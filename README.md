@@ -21,6 +21,8 @@ Everything it reads stays on your Mac.
 - **Mascots.** Animated desktop pets whose mood and health bar follow your usage: fresh, focused, tired, asleep at the limit, waking at the reset.
 - **Share card.** A 1200 × 675 image of your month for X.
 - **Claude Code integration.** A status line for your terminal and an MCP server, so Claude can check how much window is left and pace itself.
+- **Stay awake.** Keeps the Mac from idle-sleeping (when plugged in, or always) so auto-start and alerts run on time, without a separate app. The display still sleeps.
+- **One-minute setup.** A first-run guide picks your tools, signs Claude Code in, sets up phone alerts with a QR code, and takes your plan price.
 
 <p align="center"><img src="docs/dashboard.png" width="820" alt="Dashboard"></p>
 
@@ -30,7 +32,7 @@ Everything it reads stays on your Mac.
 
 ## Install
 
-**Download:** grab `Reset-0.1.dmg` from [Releases](https://github.com/msfbeast/reset/releases/latest), open it and drag Reset to Applications.
+**Download:** grab the latest `.dmg` from [Releases](https://github.com/msfbeast/reset/releases/latest), open it and drag Reset to Applications.
 
 Reset isn't notarized yet, so macOS blocks the first launch. Open Reset once, close the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway** next to Reset. You only do this once. (Or run `xattr -dr com.apple.quarantine /Applications/Reset.app` in Terminal.)
 
@@ -59,7 +61,7 @@ Find your team ID in Xcode under Settings → Accounts, or in Keychain Access on
 
 ## Setting it up
 
-Open **Settings** from the menu bar item.
+The first launch opens a short setup guide that covers all of this. You can run it again from **Settings → About**, or change anything below in **Settings**.
 
 | Feature | How |
 |---|---|
@@ -67,6 +69,7 @@ Open **Settings** from the menu bar item.
 | Phone alerts | Install the free ntfy app, subscribe to a long random topic name, and enter the same topic under **Phone alerts**. Anyone who knows the topic can read it, so make it unguessable. |
 | Auto-start | Tick **Auto-start** for Claude. It runs `claude -p "hi" --model haiku` once when a window you were watching runs out, while the Mac is awake. Each run uses a little of your quota. |
 | Value multiple | Press **Add your plan price** on the dashboard and enter what you pay per month. |
+| Stay awake | **Settings → Stay awake**: Off, When plugged in, or Always. Blocks idle sleep only; closing the lid still sleeps the Mac unless it's plugged in with an external display. |
 | Status line | Add to `~/.claude/settings.json`: `"statusLine": {"type": "command", "command": "cat \"$HOME/Library/Application Support/Reset/statusline.txt\""}` |
 | MCP server | `claude mcp add --scope user reset -- /Applications/Reset.app/Contents/MacOS/reset-mcp` |
 
@@ -83,6 +86,7 @@ It only sends anything off your Mac for two optional features, and only to the p
 
 - **Live Claude usage** sends Claude Code's sign-in to `api.anthropic.com` to read your usage. Reset never stores, refreshes or rewrites that sign-in.
 - **Phone alerts** send the alert text to the ntfy server you choose.
+- **Update checks** ask `api.github.com` once a day whether a newer release exists. Turn this off in Settings → About.
 
 No analytics, no accounts, no servers of its own.
 
@@ -91,6 +95,14 @@ No analytics, no accounts, no servers of its own.
 - **Cost** is the API list price of your tokens (input, cache writes split into 5-minute and 1-hour, cache reads, output, and advisor calls), not what you're billed on a subscription. Prices live in `Reset/Usage/Pricing.swift`.
 - **De-duplication.** Claude Code writes one transcript row per streamed content block, and resumed sessions copy rows between files. Reset counts each response once, by message id, keeping the row with the final output count.
 - **Window estimate.** Without live usage, a window is assumed to open at your first message after the previous one ended, rounded down to 10 minutes, and run 5 hours. Exact reset times from Claude Code's own limit messages override the estimate.
+
+## Tests
+
+```bash
+./scripts/test.sh
+```
+
+27 unit tests cover pricing, de-duplication, incremental parsing, window estimates, the forecast, project grouping and update checks.
 
 ## Demo mode
 

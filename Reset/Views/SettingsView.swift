@@ -5,6 +5,7 @@ struct SettingsView: View {
     @State private var newName = ""
     @State private var newHours = 5.0
     @State private var topicDraft = ""
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var m = store.mascots
@@ -125,11 +126,44 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Picker("Keep this Mac awake", selection: Binding(get: { store.keepAwake.mode }, set: { store.keepAwake.mode = $0 })) {
+                    ForEach(KeepAwake.Mode.allCases) { Text($0.label).tag($0) }
+                }
+                if store.keepAwake.mode != .off {
+                    Text(store.keepAwake.isHolding ? "Keeping the Mac awake now." : "Not holding right now: the Mac is on battery.")
+                        .font(.caption).foregroundStyle(store.keepAwake.isHolding ? Color.green : Color.secondary)
+                }
+            } header: {
+                Text("Stay awake")
+            } footer: {
+                Text("Auto-start and on-time alerts need the Mac awake. This stops idle sleep only: the display still turns off as usual. Closing the lid still sleeps the Mac unless it's plugged in with an external display. Phone alerts arrive either way.")
+                    .foregroundStyle(.secondary)
+            }
+
             Section("General") {
                 Toggle("Open at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.launchAtLogin = $0 }))
             }
 
             Section("About") {
+                Toggle("Check for updates automatically", isOn: Binding(get: { store.updater.automatic }, set: { store.updater.automatic = $0 }))
+                HStack {
+                    Text(updateText).foregroundStyle(store.updater.available == nil ? Color.secondary : Color.green)
+                    Spacer()
+                    if let u = store.updater.available {
+                        Button("Download \(u.version)") { NSWorkspace.shared.open(u.url) }
+                    } else {
+                        Button(store.updater.checking ? "Checking…" : "Check now") { store.updater.check() }.disabled(store.updater.checking)
+                    }
+                }
+                HStack {
+                    Text("Setup")
+                    Spacer()
+                    Button("Run setup again") {
+                        NSApp.activate(ignoringOtherApps: true)
+                        openWindow(id: "welcome")
+                    }
+                }
                 HStack {
                     Text("Reset \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                     Spacer()
@@ -179,6 +213,13 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var updateText: String {
+        if let u = store.updater.available { return "Reset \(u.version) is available" }
+        if let e = store.updater.lastError { return e }
+        if let d = store.updater.lastChecked { return "Up to date, checked \(Fmt.clock.string(from: d))" }
+        return "Version \(Updater.current)"
     }
 
     private var sampleCard: CardData {

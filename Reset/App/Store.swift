@@ -53,6 +53,8 @@ final class Store {
     let kicker = Kicker()
     let mascots = MascotController()
     let usage = UsageStore()
+    let keepAwake = KeepAwake()
+    let updater = Updater()
     private var tick: Timer?
     private var lastScan = Date.distantPast
     private var scanning = false
@@ -92,6 +94,8 @@ final class Store {
     func start() {
         alerts.requestPermission()
         mascots.attach(self)
+        keepAwake.start()
+        updater.start()
         usage.start()
         refresh()
         // A 1 s tick keeps the countdowns live; disk is rescanned every 60 s or on demand.
@@ -188,6 +192,17 @@ final class Store {
                 self.syncAlerts()
                 self.runAutoStarts()
                 if self.rescanQueued { self.rescanQueued = false; self.refresh() }
+                // Test hook: `--args -renderOnboarding /dir` renders every setup step once.
+                if let dir = UserDefaults.standard.string(forKey: "renderOnboarding"), !self.renderedOnboarding {
+                    self.renderedOnboarding = true
+                    for s in OnboardingView.Step.allCases {
+                        let r = ImageRenderer(content: OnboardingView(store: self, startAt: s) {}); r.scale = 2
+                        if let img = r.nsImage, let t = img.tiffRepresentation,
+                           let png = NSBitmapImageRep(data: t)?.representation(using: .png, properties: [:]) {
+                            try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent("step-\(s.rawValue).png"))
+                        }
+                    }
+                }
                 // Test hook: `--args -renderMenu /path/menu.png` renders the menu panel once.
                 if let path = UserDefaults.standard.string(forKey: "renderMenu"), !self.renderedMenu {
                     self.renderedMenu = true
@@ -275,6 +290,24 @@ final class Store {
         try? line.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    // MARK: Sign-in
+
+    /// Live usage is on but blocked by Claude Code's sign-in.
+    var liveNeedsSignIn: Bool { liveClaudeEnabled && liveClaude.needsSignIn }
+    private(set) var signingIn = false
+
+    func fixClaudeSignIn() {
+        guard !signingIn else { return }
+        signingIn = true
+        note("Opening the browser to sign Claude Code in")
+        ClaudeCLI.signIn { [weak self] ok in
+            guard let self else { return }
+            self.signingIn = false
+            self.note(ok ? "Claude Code signed in" : "Claude Code sign-in didn't finish")
+            self.liveClaude.retryNow { [weak self] in self?.refresh() }
+        }
+    }
+
     // MARK: Forecast
 
     /// Mac notification plus an immediate phone push, once per window, when the limit is projected to arrive first.
@@ -291,6 +324,7 @@ final class Store {
 
     var lastWidgetData: Data?
     private var renderedMenu = false
+    private var renderedOnboarding = false
 
     /// Writes what the desktop widgets show and asks WidgetKit to redraw, only when something changed.
     func writeWidgetSnapshot() {

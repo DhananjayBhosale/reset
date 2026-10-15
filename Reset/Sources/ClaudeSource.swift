@@ -164,7 +164,7 @@ final class TranscriptScanner {
         var kind: Kind
     }
 
-    private struct Entry { var mtime: Date; var size: Int; var events: [Event] }
+    private struct Entry { var mtime: Date; var size: Int; var events: [Event]; var offset: Int }
     private var cache: [String: Entry] = [:]
     private let lock = NSLock()
 
@@ -183,8 +183,14 @@ final class TranscriptScanner {
             let entry: Entry
             if let c = cache[url.path], c.mtime == mod, c.size == size {
                 entry = c
+            } else if let c = cache[url.path], size > c.offset, c.offset > 0 {
+                // Transcripts only grow: read just the new lines.
+                let (events, offset) = Self.parse(url, from: c.offset, size: size)
+                entry = Entry(mtime: mod, size: size, events: c.events + events, offset: offset)
+                cache[url.path] = entry
             } else {
-                entry = Entry(mtime: mod, size: size, events: Self.parse(url))
+                let (events, offset) = Self.parse(url, from: 0, size: size)
+                entry = Entry(mtime: mod, size: size, events: events, offset: offset)
                 cache[url.path] = entry
             }
             out += entry.events.filter { $0.time >= since }
@@ -200,8 +206,11 @@ final class TranscriptScanner {
         return f
     }()
 
-    static func parse(_ url: URL) -> [Event] {
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return [] }
+    static func parse(_ url: URL, from start: Int, size: Int) -> ([Event], Int) {
+        guard let all = try? Data(contentsOf: url, options: .mappedIfSafe), all.count > start else { return ([], start) }
+        let end = min(all.count, max(size, start))
+        guard end > start, let lastNewline = all[start..<end].lastIndex(of: UInt8(ascii: "\n")) else { return ([], start) }
+        let data = all[start...lastNewline]
         let assistant = Data("\"type\":\"assistant\"".utf8)
         let quota = Data("\"quotaLimits\"".utf8)
         let isError = Data("\"isApiErrorMessage\":true".utf8)
@@ -228,7 +237,7 @@ final class TranscriptScanner {
             guard line.range(of: isError) == nil, line.range(of: requestId) != nil else { continue }
             out.append(.init(time: ts, kind: .activity))
         }
-        return out
+        return (out, lastNewline + 1)
     }
 
     private static func timestamp(_ line: Data.SubSequence, key: Data) -> Date? {

@@ -12,8 +12,8 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
-    MARKETING_VERSION: "0.1"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2"
+    CURRENT_PROJECT_VERSION: "2"
 targets:
   Reset:
     type: application
@@ -63,3 +63,24 @@ targets:
         PRODUCT_NAME: reset-mcp
         ENABLE_HARDENED_RUNTIME: YES
         SKIP_INSTALL: YES
+  ResetTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - ResetTests
+    dependencies:
+      - target: Reset
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: in.trak.reset.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Reset.app/Contents/MacOS/Reset"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  Reset:
+    build:
+      targets:
+        Reset: all
+    test:
+      targets:
+        - ResetTests

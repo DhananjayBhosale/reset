@@ -1,176 +1,285 @@
 import SwiftUI
 
+/// The menu bar panel: one glanceable status, a few numbers, today's windows, and quiet tools.
 struct MenuView: View {
     @Bindable var store: Store
     @Environment(\.openWindow) private var openWindow
 
+    private var claude: WindowStatus? { store.visible.first { $0.id == "claude" } }
+    private var hero: WindowStatus? { claude ?? store.visible.first }
+    private var others: [WindowStatus] { store.visible.filter { $0.id != hero?.id } }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                MicroLabel("Reset")
-                Spacer()
-                Text(Fmt.clock.string(from: store.now)).font(Theme.mono(10)).foregroundStyle(Theme.dim)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            Hairline()
-
-            if store.visible.isEmpty {
-                Text("No providers switched on. Open Settings.")
-                    .font(.system(size: 11)).foregroundStyle(Theme.dim).padding(14)
-            }
-            ForEach(store.visible) { s in
-                ProviderRow(store: store, status: s)
-                Hairline()
-            }
-
-            if let last = store.log.first {
-                Text(last).font(Theme.mono(9, .regular)).foregroundStyle(Theme.dim).lineLimit(2)
-                    .padding(.horizontal, 14).padding(.top, 8)
-            }
-
-            HStack(spacing: 8) {
-                LineButton("Dashboard", color: Theme.accent) {
-                    NSApp.activate(ignoringOtherApps: true)
-                    openWindow(id: "dashboard")
+            header
+            if store.liveNeedsSignIn { signInBanner }
+            if let u = store.updater.available { updateBanner(u) }
+            VStack(alignment: .leading, spacing: 12) {
+                if let h = hero {
+                    LookCard(look: store.look, d: store.cardData(for: h), now: store.now)
+                        .frame(height: 128)
+                        .help(h.source)
+                    notices(for: h)
+                } else {
+                    Text("No tools switched on yet. Open Settings to pick yours.")
+                        .font(.system(size: 12)).foregroundStyle(Theme.dim).padding(.vertical, 20)
                 }
-                LineButton("Settings") {
-                    NSApp.activate(ignoringOtherApps: true)
-                    openWindow(id: "settings")
+                if hero?.id == "claude" { stats; todayStrip }
+                if !others.isEmpty {
+                    VStack(spacing: 0) { ForEach(others) { MiniProviderRow(store: store, status: $0) } }
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
                 }
-                LineButton("Rescan") { store.refresh() }
-                LineButton("Pets", color: store.mascots.enabled ? Theme.text : Theme.dim) { store.mascots.enabled.toggle() }
-                Spacer()
-                LineButton("Quit", color: Theme.dim) { NSApp.terminate(nil) }
             }
-            .padding(14)
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
+            toolbar
         }
         .frame(width: 380)
-        .background(Theme.panel)
+        .background(
+            ZStack {
+                Color(hex: 0x0B0B0C)
+                RadialGradient(colors: [Theme.color(for: hero?.id ?? "claude").opacity(0.16), .clear],
+                               center: .top, startRadius: 0, endRadius: 260)
+            }
+        )
         .environment(\.colorScheme, .dark)
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            if let h = hero, let img = MascotArt.image(h.id, Mood.of(h, justReset: false)) {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fit).frame(width: 30, height: 30)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(headline).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                Text(subline).font(.system(size: 11)).foregroundStyle(Theme.dim)
+            }
+            Spacer()
+            Text(Fmt.clock.string(from: store.now)).font(.system(size: 11).monospacedDigit()).foregroundStyle(Theme.dim)
+        }
+        .padding(.horizontal, 14).padding(.top, 12)
+    }
+
+    private var headline: String {
+        guard let h = hero else { return "Reset" }
+        switch h.state {
+        case .ready: return "\(h.name) · fresh window ready"
+        case .unavailable: return h.name
+        case .active:
+            if let b = h.blockedUntil, b > store.now { return "\(h.name) · weekly limit reached" }
+            if let u = h.usedPercent { return "\(h.name) · \(Int((100 - u).rounded()))% left" }
+            if let r = h.resetsAt { return "\(h.name) · \(Fmt.countdown(r.timeIntervalSince(store.now))) left" }
+            return "\(h.name) · window running"
+        }
+    }
+
+    private var subline: String {
+        guard let h = hero else { return "" }
+        if let b = h.blockedUntil, b > store.now { return "Back \(Fmt.when(b, now: store.now))" }
+        if let r = h.resetsAt { return "Resets \(Fmt.when(r, now: store.now))" + (h.isEstimate ? " · estimated" : "") }
+        if case .unavailable(let why) = h.state { return why }
+        return "Send a message to start the clock"
+    }
+
+    private var signInBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color(hex: 0xFFB13D))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Live usage paused").font(.system(size: 12, weight: .semibold))
+                Text("Claude Code is signed out, so Claude is estimated.").font(.system(size: 11)).foregroundStyle(Theme.dim)
+            }
+            Spacer()
+            Button(store.signingIn ? "Waiting…" : "Fix") { store.fixClaudeSignIn() }
+                .buttonStyle(PillButtonStyle(tint: Color(hex: 0xFFB13D)))
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0xFFB13D).opacity(0.1)))
+        .padding(.horizontal, 14).padding(.top, 10)
+    }
+
+    private func updateBanner(_ u: Updater.Release) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.down.circle.fill").foregroundStyle(Dash.green)
+            Text("Reset \(u.version) is available").font(.system(size: 12, weight: .semibold))
+            Spacer()
+            Button("Download") { NSWorkspace.shared.open(u.url) }.buttonStyle(PillButtonStyle(tint: Dash.green))
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Dash.green.opacity(0.1)))
+        .padding(.horizontal, 14).padding(.top, 10)
+    }
+
+    @ViewBuilder private func notices(for h: WindowStatus) -> some View {
+        if h.id == "claude", let out = store.forecast.runsOutAt {
+            Label("At this pace you run out around \(Fmt.clock.string(from: out))", systemImage: "flame")
+                .font(.system(size: 11, weight: .medium)).foregroundStyle(Color(hex: 0xFF8A5C))
+        }
+        if let sec = h.secondary {
+            Label("\(sec.label) resets \(Fmt.when(sec.resetsAt, now: store.now))\(sec.usedPercent.map { " · \(Int($0.rounded()))% used" } ?? "")",
+                  systemImage: "calendar")
+                .font(.system(size: 11)).foregroundStyle(Theme.dim)
+        }
+    }
+
+    // MARK: Numbers
+
+    private var stats: some View {
+        let cal = Calendar.current
+        let today = store.usage.calls.filter { cal.isDateInToday($0.time) }.reduce(0) { $0 + $1.cost }
+        let week = store.usage.calls.filter { $0.time >= Date().addingTimeInterval(-7 * 86400) }.reduce(0) { $0 + $1.cost }
+        let plan = store.usage.effectivePlan * 7 / 30
+        return HStack(spacing: 8) {
+            StatChip(value: Dash.money(today), label: "today")
+            StatChip(value: Dash.money(week), label: "7 days")
+            if plan > 0 {
+                StatChip(value: String(format: "%.1f×", week / plan), label: "value", tint: Dash.green)
+            } else {
+                StatChip(value: "\(store.usage.windows(days: 7).count)", label: "windows")
+            }
+        }
+    }
+
+    private var todayStrip: some View {
+        let wins = store.usage.windows(days: 1)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Today").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.dim)
+                Spacer()
+                Text("\(wins.count) window\(wins.count == 1 ? "" : "s")").font(.system(size: 11)).foregroundStyle(Theme.dim)
+            }
+            WindowBarcode(windows: wins, days: 1, showLabels: false, rowHeight: 14).frame(height: 14)
+            HStack {
+                ForEach(["12 AM", "6 AM", "12 PM", "6 PM", ""], id: \.self) { t in
+                    Text(t).font(.system(size: 9)).foregroundStyle(Theme.dim.opacity(0.7))
+                    if !t.isEmpty { Spacer() }
+                }
+            }
+        }
+    }
+
+    // MARK: Toolbar
+
+    private var toolbar: some View {
+        HStack(spacing: 4) {
+            ToolButton(icon: "square.grid.2x2", label: "Dashboard") { open("dashboard") }
+            ToolButton(icon: "square.and.arrow.up", label: "Share") { store.usage.shareRequested = true; open("dashboard") }
+            ToolButton(icon: store.mascots.enabled ? "pawprint.fill" : "pawprint", label: "Pets",
+                       active: store.mascots.enabled) { store.mascots.enabled.toggle() }
+            ToolButton(icon: "gearshape", label: "Settings") { open("settings") }
+            Spacer()
+            Menu {
+                if claude != nil {
+                    Button("I just used Claude on the web") { store.markClaudeUsedElsewhere() }
+                }
+                ForEach(store.visible.filter { $0.canAutoStart && $0.state == .ready && store.commands[$0.id]?.isEmpty == false }) { s in
+                    Button("Start a \(s.name) window now") { store.kickNow(s.id) }
+                }
+                ForEach(store.visible.filter { $0.id.hasPrefix("custom-") }) { s in
+                    Button("I started \(s.name)") { store.startCustom(s.id) }
+                }
+                Button("Rescan now") { store.refresh(); store.usage.refresh() }
+                Divider()
+                Button("Quit Reset") { NSApp.terminate(nil) }
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).frame(width: 30, height: 26)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(Color.white.opacity(0.03))
+        .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1) }
+    }
+
+    private func open(_ id: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow(id: id)
     }
 }
 
-struct ProviderRow: View {
+/// A compact row for providers other than the main one.
+struct MiniProviderRow: View {
     let store: Store
     let status: WindowStatus
 
-    private var color: Color { Theme.color(for: status.id) }
-    private var prefs: ProviderPrefs { store.prefs(for: status.id) }
-
     var body: some View {
-        if store.look == .mono { monoRow } else {
-            VStack(alignment: .leading, spacing: 6) {
-                LookCard(look: store.look, d: store.cardData(for: status), now: store.now)
-                    .frame(height: 128)
-                if status.id == "claude", let out = store.forecast.runsOutAt {
-                    Text("At this pace you run out around \(Fmt.clock.string(from: out))")
-                        .font(.system(size: 10, weight: .medium)).foregroundStyle(Color(hex: 0xFF8A5C))
-                }
-                if let sec = status.secondary {
-                    Text("\(sec.label)  resets \(Fmt.when(sec.resetsAt, now: store.now))\(sec.usedPercent.map { "  ·  \(Int($0.rounded()))% used" } ?? "")")
-                        .font(.system(size: 10)).foregroundStyle(Theme.dim)
-                }
-                actions
+        let d = store.cardData(for: status)
+        HStack(spacing: 10) {
+            if let img = MascotArt.image(status.id, Mood.of(status, justReset: false)) {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fit).frame(width: 26, height: 26)
+            } else {
+                Circle().fill(Theme.color(for: status.id)).frame(width: 8, height: 8).frame(width: 26)
             }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .help(status.source)
+            Text(status.name).font(.system(size: 12, weight: .medium))
+            Spacer()
+            HealthDots(left: d.left(at: store.now), color: Theme.color(for: status.id))
+            CountdownText(d: d, now: store.now).font(.system(size: 12).monospacedDigit()).foregroundStyle(Theme.dim)
+                .frame(width: 50, alignment: .trailing)
         }
-    }
-
-    private var monoRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Circle().fill(color).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] }
-                Text(status.name.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(1.4)
-                    .foregroundStyle(Theme.text)
-                if status.isEstimate { Tag("est") }
-                if prefs.autoStart && status.canAutoStart { Tag("auto", color: color) }
-                Spacer()
-                countdown
-            }
-            HStack {
-                Text(detail).font(Theme.mono(10, .regular)).foregroundStyle(Theme.dim)
-                Spacer()
-                if let u = status.usedPercent { Text("\(Int(u.rounded()))% used").font(Theme.mono(10, .regular)).foregroundStyle(Theme.dim) }
-            }
-            if let u = status.usedPercent { Meter(fraction: u / 100, color: color) }
-            if let sec = status.secondary {
-                HStack {
-                    Text("\(sec.label.uppercased())  resets \(Fmt.when(sec.resetsAt, now: store.now))")
-                        .font(Theme.mono(9, .regular)).foregroundStyle(Theme.dim)
-                    Spacer()
-                    if let u = sec.usedPercent { Text("\(Int(u.rounded()))%").font(Theme.mono(9, .regular)).foregroundStyle(Theme.dim) }
-                }
-            }
-            actions
-        }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.horizontal, 10).padding(.vertical, 8)
         .help(status.source)
     }
-
-    @ViewBuilder private var countdown: some View {
-        switch status.state {
-        case .active(let at):
-            Text(Fmt.countdown(at.timeIntervalSince(store.now))).font(Theme.mono(18)).foregroundStyle(Theme.text)
-                .monospacedDigit()
-        case .ready:
-            Text("READY").font(Theme.mono(13, .regular)).foregroundStyle(color)
-        case .unavailable:
-            Text("--").font(Theme.mono(13)).foregroundStyle(Theme.dim)
-        }
-    }
-
-    private var detail: String {
-        switch status.state {
-        case .active(let at): return "resets \(Fmt.when(at, now: store.now))"
-        case .ready: return "next message starts a window"
-        case .unavailable(let why): return why
-        }
-    }
-
-    @ViewBuilder private var actions: some View {
-        let isCustom = status.id.hasPrefix("custom-")
-        if status.id == "claude" || isCustom || (status.canAutoStart && status.state == .ready) {
-            HStack(spacing: 6) {
-                if status.id == "claude" {
-                    LineButton("Used on web", color: color) { store.markClaudeUsedElsewhere() }
-                        .help("Tell Reset you just used Claude outside Claude Code, so it can start the clock")
-                }
-                if isCustom {
-                    LineButton("Started now", color: color) { store.startCustom(status.id) }
-                    if status.resetsAt != nil { LineButton("Clear", color: Theme.dim) { store.clearCustom(status.id) } }
-                }
-                if status.canAutoStart && status.state == .ready && store.commands[status.id]?.isEmpty == false {
-                    LineButton("Start window", color: color) { store.kickNow(status.id) }
-                        .help("Runs: \(store.commands[status.id] ?? "")")
-                }
-            }
-            .padding(.top, 2)
-        }
-    }
 }
 
-struct Tag: View {
-    let text: String
-    var color: Color = Theme.dim
-    init(_ text: String, color: Color = Theme.dim) { self.text = text; self.color = color }
-    var body: some View {
-        Text(text.uppercased()).font(.system(size: 8, weight: .medium)).tracking(1)
-            .foregroundStyle(color).padding(.horizontal, 4).padding(.vertical, 1)
-            .overlay(RoundedRectangle(cornerRadius: 2).stroke(color.opacity(0.5), lineWidth: 1))
-    }
-}
-
-struct Meter: View {
-    let fraction: Double
+struct HealthDots: View {
+    let left: Double?
     let color: Color
     var body: some View {
-        GeometryReader { g in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(Theme.hairline)
-                Rectangle().fill(color).frame(width: g.size.width * min(1, max(0, fraction)))
+        HStack(spacing: 2) {
+            ForEach(0..<6, id: \.self) { i in
+                let lit = left.map { Double(i) < ($0 * 6).rounded(.up) } ?? true
+                Capsule().fill(lit ? (left == nil ? color.opacity(0.3) : color) : Color.white.opacity(0.12)).frame(width: 7, height: 4)
             }
         }
-        .frame(height: 2)
+    }
+}
+
+struct StatChip: View {
+    let value: String
+    let label: String
+    var tint: Color = .white
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(.system(size: 15, weight: .medium).monospacedDigit()).foregroundStyle(tint).lineLimit(1).minimumScaleFactor(0.7)
+            Text(label).font(.system(size: 10)).foregroundStyle(Theme.dim)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.05)))
+    }
+}
+
+struct ToolButton: View {
+    let icon: String
+    let label: String
+    var active = false
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 14))
+                Text(label).font(.system(size: 9))
+            }
+            .foregroundStyle(active ? Theme.accent : (hover ? Color.white : Color.white.opacity(0.7)))
+            .frame(width: 62, height: 38)
+            .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(hover ? 0.08 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+    }
+}
+
+struct PillButtonStyle: ButtonStyle {
+    var tint: Color
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.black)
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .background(Capsule().fill(tint.opacity(configuration.isPressed ? 0.7 : 1)))
     }
 }

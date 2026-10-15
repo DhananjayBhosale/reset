@@ -41,7 +41,11 @@ struct DashboardView: View {
         .background(Color.black)
         .environment(\.colorScheme, .dark)
         .frame(minWidth: 1120, minHeight: 760)
-        .onAppear { if usage.lastScan == nil { usage.refresh() } }
+        .onAppear {
+            if usage.lastScan == nil { usage.refresh() }
+            if usage.shareRequested { usage.shareRequested = false; sharing = true }
+        }
+        .onChange(of: usage.shareRequested) { _, v in if v { usage.shareRequested = false; sharing = true } }
     }
 
     @ViewBuilder private func scrolling<C: View>(@ViewBuilder _ c: () -> C) -> some View {
@@ -84,7 +88,13 @@ struct DashboardView: View {
             .padding(3)
             .background(Capsule().fill(Color.white.opacity(0.04)))
             if usage.loading {
-                ProgressView().controlSize(.small)
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    if usage.lastScan == nil {
+                        Text(usage.filesRead > 0 ? "Reading your history · \(usage.filesRead) files" : "Reading your history…")
+                            .font(.system(size: 12)).foregroundStyle(Dash.dim)
+                    }
+                }
             }
             Button { sharing = true } label: {
                 Text("Share card").font(.system(size: 12, weight: .medium)).foregroundStyle(.black)
@@ -117,6 +127,7 @@ struct DashboardView: View {
             sideToggle("Auto-start", on: store.prefs(for: "claude").autoStart)
             sideToggle("Phone alerts", on: store.phoneEnabled)
             sideToggle("Mascots", on: store.mascots.enabled)
+            sideToggle("Stay awake", on: store.keepAwake.isHolding)
             Spacer()
             if let t = usage.lastScan {
                 Text("Usage read \(Fmt.clock.string(from: t))").font(.system(size: 11)).foregroundStyle(Dash.faint).padding(.horizontal, 10)
@@ -187,7 +198,13 @@ struct DashboardView: View {
                         }
                     }
                     Group {
-                        if let out = store.forecast.runsOutAt, c?.state != .ready {
+                        if store.liveNeedsSignIn {
+                            HStack(spacing: 6) {
+                                Text("Live usage paused: Claude Code is signed out.").foregroundStyle(Color(hex: 0xFFB13D))
+                                Button(store.signingIn ? "Waiting for browser…" : "Sign in") { store.fixClaudeSignIn() }
+                                    .buttonStyle(.plain).foregroundStyle(.white).underline()
+                            }
+                        } else if let out = store.forecast.runsOutAt, c?.state != .ready {
                             Text("at this pace you run out around \(Fmt.clock.string(from: out))").foregroundStyle(Color(hex: 0xFF8A5C))
                         } else {
                             Text(c?.state == .ready ? "send a message to start the clock" : "until a fresh window").foregroundStyle(Dash.dim)

@@ -59,11 +59,15 @@ final class UsageStore {
     private(set) var limitHits: [Date] = []
     private(set) var apiMillis: [String: Int] = [:]
     private(set) var loading = false
+    /// Files parsed so far in the current scan, for the first-launch progress message.
+    private(set) var filesRead = 0
     private(set) var lastScan: Date?
     var range: UsageRange = UsageRange(rawValue: UserDefaults.standard.string(forKey: "usageRange") ?? "") ?? .month {
         didSet { UserDefaults.standard.set(range.rawValue, forKey: "usageRange") }
     }
     var selectedSession: String?
+    /// Set from the menu's Share button; the dashboard opens the share sheet when it sees it.
+    var shareRequested = false
     var planMonthlyUSD: Double { didSet { UserDefaults.standard.set(planMonthlyUSD, forKey: "planMonthlyUSD") } }
 
     private let scanner = ClaudeUsageScanner()
@@ -107,6 +111,8 @@ final class UsageStore {
         }
         guard !loading else { return }
         loading = true
+        filesRead = 0
+        scanner.progress = { [weak self] n in DispatchQueue.main.async { self?.filesRead = n } }
         let since = Date().addingTimeInterval(-Self.historyDays * 86400)
         queue.async { [weak self] in
             guard let self else { return }

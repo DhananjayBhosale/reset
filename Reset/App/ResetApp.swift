@@ -20,6 +20,12 @@ struct ResetApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1240, height: 900)
 
+        Window("Welcome to Reset", id: "welcome") {
+            WelcomeWindow(store: store)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+
         Window("Reset Settings", id: "settings") {
             SettingsView(store: store)
         }
@@ -35,7 +41,11 @@ struct MenuBarLabel: View {
             .task {
                 // `open -a Reset --args -openDashboard YES`, and the first launch after install, show the dashboard.
                 let d = UserDefaults.standard
-                if d.bool(forKey: "openDashboard") || !d.bool(forKey: "dashboardSeen") {
+                if Demo.isOn { return }
+                if !d.bool(forKey: "onboarded") || d.bool(forKey: "openWelcome") {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "welcome")
+                } else if d.bool(forKey: "openDashboard") || !d.bool(forKey: "dashboardSeen") {
                     d.set(true, forKey: "dashboardSeen")
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "dashboard")
@@ -47,9 +57,28 @@ struct MenuBarLabel: View {
         if let r = store.readyForBar {
             Text("\(r.name.prefix(1)) ready")
         } else if let s = store.soonest, let at = s.resetsAt {
-            Text("\(s.name.prefix(1)) \(Fmt.short(at.timeIntervalSince(store.now)))").monospacedDigit()
+            if store.liveNeedsSignIn && s.id == "claude" {
+                Text("\(Image(systemName: "exclamationmark.triangle.fill")) \(s.name.prefix(1)) \(Fmt.short(at.timeIntervalSince(store.now)))").monospacedDigit()
+            } else {
+                Text("\(s.name.prefix(1)) \(Fmt.short(at.timeIntervalSince(store.now)))").monospacedDigit()
+            }
         } else {
             Image(systemName: "hourglass")
+        }
+    }
+}
+
+/// Hosts the first-run setup and hands over to the dashboard when it's done.
+struct WelcomeWindow: View {
+    let store: Store
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    var body: some View {
+        OnboardingView(store: store) {
+            UserDefaults.standard.set(true, forKey: "onboarded")
+            UserDefaults.standard.set(true, forKey: "dashboardSeen")
+            openWindow(id: "dashboard")
+            dismissWindow(id: "welcome")
         }
     }
 }

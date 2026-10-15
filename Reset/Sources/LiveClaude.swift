@@ -15,6 +15,8 @@ final class LiveClaude {
 
     private(set) var snapshot: Snapshot?
     private(set) var state: State = .off
+    /// True when the failure is about Claude Code's sign-in, which the user has to fix (not a network blip).
+    private(set) var needsSignIn = false
     private var lastAttempt = Date.distantPast
     private var backoffUntil = Date.distantPast
     private let lock = NSLock()
@@ -30,6 +32,11 @@ final class LiveClaude {
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
+            // Test hook: `-simulateSignedOut YES` behaves as if Claude Code's sign-in expired.
+            if UserDefaults.standard.bool(forKey: "simulateSignedOut") {
+                self.finish(.problem("Claude Code's sign-in has expired. Open Claude Code once and it renews itself"), done)
+                return
+            }
             guard let token = Self.readToken() else {
                 self.finish(.problem("Claude Code isn't signed in on this Mac, or Keychain access was denied"), done)
                 return
@@ -68,6 +75,7 @@ final class LiveClaude {
                     try? d.write(to: WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("live-usage.json"))
                 }
                 DispatchQueue.main.async {
+                    self.needsSignIn = false
                     self.snapshot = snap
                     self.state = snap.fiveHour == nil && snap.sevenDay == nil
                         ? .problem("Signed in, but Anthropic reports no usage windows for this account")
@@ -78,13 +86,24 @@ final class LiveClaude {
         }
     }
 
+    /// Fetch again right away, e.g. after the user signs Claude Code back in.
+    func retryNow(done: @escaping () -> Void) {
+        lock.lock(); lastAttempt = .distantPast; backoffUntil = .distantPast; lock.unlock()
+        poll(interval: 0, done: done)
+    }
+
     func reset() {
+        needsSignIn = false
         lock.lock(); lastAttempt = .distantPast; backoffUntil = .distantPast; lock.unlock()
         snapshot = nil
         state = .off
     }
 
     private func finish(_ s: State, _ done: @escaping () -> Void) {
+        if case .problem(let why) = s {
+            let w = why.lowercased()
+            needsSignIn = w.contains("sign-in") || w.contains("signed in") || w.contains("didn't accept")
+        }
         if case .problem(let why) = s {
             let diag: [String: Any] = ["fetched": ISO8601DateFormatter().string(from: Date()), "problem": why]
             if let d = try? JSONSerialization.data(withJSONObject: diag, options: .prettyPrinted) {
