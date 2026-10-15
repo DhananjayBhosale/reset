@@ -30,7 +30,13 @@ Everything it reads stays on your Mac.
 
 ## Install
 
-Reset isn't notarized yet, so for now you build it yourself. It takes about two minutes.
+**Download:** grab `Reset-0.1.dmg` from [Releases](https://github.com/msfbeast/reset/releases/latest), open it and drag Reset to Applications.
+
+Reset isn't notarized yet, so macOS blocks the first launch. Open Reset once, close the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway** next to Reset. You only do this once. (Or run `xattr -dr com.apple.quarantine /Applications/Reset.app` in Terminal.)
+
+The download is ad-hoc signed, so its widgets won't appear. For widgets, build it yourself as below.
+
+**Build from source** (about two minutes):
 
 You need macOS 14 or later, Xcode 16 or later, and [XcodeGen](https://github.com/yonaskolb/XcodeGen):
 

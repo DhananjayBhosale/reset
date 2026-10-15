@@ -31,4 +31,21 @@ if [[ -n "$IDENTITY" && -n "$NOTARY_PROFILE" ]]; then
   xcrun stapler staple "$OUT/Reset.app"
   rm "$ZIP"; ditto -c -k --keepParent "$OUT/Reset.app" "$ZIP"
 fi
+# Disk image: Reset.app next to an Applications shortcut, for drag-to-install.
+DMG="$OUT/Reset-$VERSION.dmg"
+STAGE="$OUT/dmg"
+rm -rf "$STAGE"; mkdir -p "$STAGE"
+cp -R "$OUT/Reset.app" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -volname "Reset" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$DMG" >/dev/null
+rm -rf "$STAGE"
+if [[ -n "$IDENTITY" ]]; then
+  codesign --sign "$IDENTITY" --timestamp "$DMG"
+  if [[ -n "$NOTARY_PROFILE" ]]; then
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$DMG"
+  fi
+fi
+
 echo "Release: $ZIP"
+echo "Release: $DMG"
