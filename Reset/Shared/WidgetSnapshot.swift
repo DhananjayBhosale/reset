@@ -49,6 +49,8 @@ struct WidgetSnapshot: Codable {
     var limitDays: [Int]?
     /// Projected time the Claude window runs out before its reset, when the pace says so.
     var claudeRunsOutAt: Date?
+    /// When a widget's "Start now" was pressed and the app began starting Claude's window; cleared when done.
+    var startingAt: Date?
 
     struct Project: Codable { var name: String; var cost: Double }
 

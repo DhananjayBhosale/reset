@@ -22,22 +22,28 @@ case "$1" in
   *) echo "usage: $0 [--update-goldens]" >&2; exit 2 ;;
 esac
 
-rm -rf build/drift/actual
+# The tests write here (the user's temporary folder) rather than into the repo; see DriftTests.
+OUT="$(getconf DARWIN_USER_TEMP_DIR)reset-drift"
+rm -rf "$OUT"
 xcodegen generate --quiet
 rc=0
-xcodebuild test -project Reset.xcodeproj -scheme Reset -configuration Debug -derivedDataPath build/TestDerived \
+xcodebuild test -project Reset.xcodeproj -scheme Reset -configuration Debug -derivedDataPath "$HOME/Library/Caches/Reset/TestDerived" \
   -destination 'platform=macOS' -only-testing:ResetTests/DriftTests CODE_SIGN_IDENTITY=- 2>&1 \
   | grep -E "\.swift:[0-9]+:[0-9]+: error:|Drift in|golden:|actual:|Executed [0-9]+ tests|TEST (SUCCEEDED|FAILED)" | grep -v "Test Suite" || rc=$?
 
 if [[ -n "$TEST_RUNNER_RESET_UPDATE_GOLDENS" ]]; then
-  [[ $rc -eq 0 ]] && { echo "Goldens rewritten. Review them with: git diff Fixtures/golden"; git status --short Fixtures/golden; }
+  if [[ $rc -eq 0 && -d "$OUT/golden" ]]; then
+    # Copied from here, so only this script (not the test process) writes into the repo.
+    rsync -a "$OUT/golden/" Fixtures/golden/
+    echo "Goldens rewritten. Review them with: git diff Fixtures/golden"; git status --short Fixtures/golden
+  fi
   exit $rc
 fi
 
 if [[ $rc -ne 0 ]]; then
   # Show every difference, not just the first line each test reports.
-  if [[ -d build/drift/actual ]]; then
-    diff -ru Fixtures/golden build/drift/actual || true
+  if [[ -d "$OUT/actual" ]]; then
+    diff -ru Fixtures/golden "$OUT/actual" || true
   fi
   echo "Drift check FAILED. See \"When the drift check fails\" in README.md."
 fi

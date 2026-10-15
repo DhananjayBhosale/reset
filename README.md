@@ -17,7 +17,7 @@ Everything it reads stays on your Mac.
 - **Limit forecast.** At your current pace, will you hit the limit before the reset? Reset warns you once per window, on your Mac and your phone.
 - **Auto-start.** Optional. When a window runs out, Reset sends a one-word prompt so the next window starts right away instead of when you wake up.
 - **Dashboard.** API-price value of your usage against your plan, cache savings, every 5-hour window of the week, token mix, when you build, cost per session and per project, and what used each session (main thread, subagents, each MCP server).
-- **8 desktop widgets**, including **Fuse**: your window as a burning fuse, with where today's pace runs out and how much to slow down to make the reset. The others: countdown, gauge, arrival, today's spend, month calendar, week, and a Game Boy. Plus **8 looks** for the menu card.
+- **8 desktop widgets**, including **Fuse**: your window as a burning fuse, with where today's pace runs out and how much to slow down to make the reset. The others: countdown, gauge, arrival, today's spend, month calendar, week, and a Game Boy. When a fresh window is waiting, the countdown and Fuse widgets show a **Start now** button that starts it right from your desktop. Plus **8 looks** for the menu card.
 - **Mascots.** Animated desktop pets whose mood and health bar follow your usage: fresh, focused, tired, asleep at the limit, waking at the reset.
 - **Share card.** A 1200 × 675 image of your month for X.
 - **Claude Code integration.** A status line for your terminal and an MCP server, so Claude can check how much window is left and pace itself, including a per-task budget that tells it when to wrap up or switch to a smaller model.
@@ -119,7 +119,7 @@ The unit tests cover pricing, de-duplication, incremental parsing, window estima
 
 The fixtures are frozen files, so a failure means **Reset's parsing changed**, not that a tool changed its format.
 
-- **You changed a parser on purpose:** read the diff (`diff -ru Fixtures/golden build/drift/actual`). If every difference is one you intended, run `--update-goldens` and commit the new goldens with the parser change.
+- **You changed a parser on purpose:** read the diff the script prints (it compares `Fixtures/golden` with the fresh output in your temporary folder). If every difference is one you intended, run `--update-goldens` and commit the new goldens with the parser change.
 - **You didn't mean to change anything:** treat it as a regression and fix the code, not the golden.
 
 **After a Claude Code update**, Reset watches for you: while scanning, it counts recent transcript rows that look like usage but can't be read (bad JSON, a timestamp it can't parse, a missing message, id, model or token counts, token counts that aren't numbers, an unknown limit kind), and notices when Claude Code writes plenty of log lines with no usage in them at all. If that happens in the last 2 days, Settings shows a warning at the top naming the Claude Code version. Healthy logs show one quiet line under Settings → About. It runs on your Mac and sends nothing. The goldens themselves won't fail, because they don't read your live logs. To capture a new format for them:

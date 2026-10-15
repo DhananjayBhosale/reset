@@ -1,0 +1,50 @@
+import XCTest
+@testable import Reset
+
+/// The widgets' "Start now": when the app agrees to start, and that the request gets from widget to app.
+final class StartNowTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_772_442_000)
+
+    private func claude(_ state: WindowStatus.State, blockedFor: TimeInterval? = nil) -> WindowStatus {
+        var s = WindowStatus(id: "claude", name: "Claude", state: state, usedPercent: nil, isEstimate: false, source: "",
+                             secondary: nil, canAutoStart: true)
+        s.blockedUntil = blockedFor.map { now.addingTimeInterval($0) }
+        return s
+    }
+
+    func testStartsOnlyWhenAFreshWindowIsWaiting() {
+        let cmd = #"claude -p "hi""#
+        XCTAssertTrue(Store.shouldStartFromWidget(claude(.ready), command: cmd, kicking: false, demo: false, now: now))
+        XCTAssertFalse(Store.shouldStartFromWidget(claude(.active(resetsAt: now.addingTimeInterval(3600))), command: cmd, kicking: false, demo: false, now: now),
+                       "a window is already running")
+        XCTAssertFalse(Store.shouldStartFromWidget(claude(.ready), command: cmd, kicking: true, demo: false, now: now), "already starting")
+        XCTAssertFalse(Store.shouldStartFromWidget(claude(.ready, blockedFor: 3600), command: cmd, kicking: false, demo: false, now: now),
+                       "weekly limit: a new window wouldn't help")
+        XCTAssertTrue(Store.shouldStartFromWidget(claude(.ready, blockedFor: -60), command: cmd, kicking: false, demo: false, now: now),
+                      "a weekly limit that has ended doesn't block")
+        XCTAssertFalse(Store.shouldStartFromWidget(claude(.ready), command: "", kicking: false, demo: false, now: now), "no command")
+        XCTAssertFalse(Store.shouldStartFromWidget(claude(.ready), command: cmd, kicking: false, demo: true, now: now), "demo mode")
+        XCTAssertFalse(Store.shouldStartFromWidget(nil, command: cmd, kicking: false, demo: false, now: now))
+    }
+
+    func testRequestPostedByTheWidgetReachesTheListener() {
+        // A made-up provider name, so the app's real listener (for "claude") never hears it.
+        let provider = "test-\(UUID().uuidString)"
+        let heard = expectation(description: "listener called")
+        let listener = StartRequest.Listener(name: StartRequest.name(provider)) { heard.fulfill() }
+        StartRequest.post(provider)
+        wait(for: [heard], timeout: 5)
+        withExtendedLifetime(listener) {}
+    }
+
+    func testAReleasedListenerStopsListening() {
+        let provider = "test-\(UUID().uuidString)"
+        let heard = expectation(description: "not called")
+        heard.isInverted = true
+        var listener: StartRequest.Listener? = StartRequest.Listener(name: StartRequest.name(provider)) { heard.fulfill() }
+        listener = nil
+        StartRequest.post(provider)
+        wait(for: [heard], timeout: 1)
+        XCTAssertNil(listener)
+    }
+}

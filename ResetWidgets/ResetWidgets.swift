@@ -76,6 +76,12 @@ enum W {
     static func isReady(_ p: WidgetSnapshot.Provider, at date: Date) -> Bool {
         p.ready || (p.resetsAt.map { $0 <= date } ?? false)
     }
+
+    /// A "Start now" is in progress: pressed within the last 4 minutes (a run's limit is 3) and still no window.
+    static func isStarting(_ s: WidgetSnapshot?, at date: Date) -> Bool {
+        guard let t = s?.startingAt, date.timeIntervalSince(t) < 240, let p = s?.claude else { return false }
+        return isReady(p, at: date)
+    }
 }
 
 struct Segments: View {
@@ -143,7 +149,12 @@ struct ClaudeSmall: View {
                 if let p {
                     Countdown(p: p, date: e.date, size: 30).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
                     Text(subtitle(p)).font(.system(size: 11)).foregroundStyle(W.dim)
-                    Segments(health: W.health(p, at: e.date), color: W.color("claude")).padding(.top, 2)
+                    // A fresh window waiting is the one moment there's something to do, so offer it.
+                    if W.isReady(p, at: e.date) && (p.blockedUntil.map { $0 <= e.date } ?? true) {
+                        StartNowButton(snap: e.snap, date: e.date, compact: true).padding(.top, 2)
+                    } else {
+                        Segments(health: W.health(p, at: e.date), color: W.color("claude")).padding(.top, 2)
+                    }
                 } else {
                     Text("Open Reset").font(.system(size: 13)).foregroundStyle(W.dim)
                 }

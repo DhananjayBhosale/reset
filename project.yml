@@ -12,8 +12,8 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
-    MARKETING_VERSION: "0.3.5"
-    CURRENT_PROJECT_VERSION: "8"
+    MARKETING_VERSION: "0.3.6"
+    CURRENT_PROJECT_VERSION: "9"
 targets:
   Reset:
     type: application
@@ -70,6 +70,11 @@ targets:
     platform: macOS
     sources:
       - ResetTests
+      # Copied into the test bundle so tests read them from there, not from the repo (which may sit in a
+      # privacy-protected folder like Desktop, and would make macOS ask for access on every rebuild).
+      - path: Fixtures
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: Reset
     settings:

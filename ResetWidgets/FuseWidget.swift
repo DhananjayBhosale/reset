@@ -34,7 +34,12 @@ struct Fuse: View {
                 Spacer(minLength: 0)
             }
             Spacer(minLength: 4)
-            fuse(m).frame(height: 44)
+            if m.state == .ready {
+                // Nothing is burning yet: the button lights the fuse.
+                HStack { StartNowButton(snap: e.snap, date: e.date); Spacer() }
+                Spacer(minLength: 2)
+            }
+            fuse(m).frame(height: m.state == .ready ? 22 : 44)
             HStack {
                 Text(m.start.map(time) ?? " ").font(.system(size: 10)).foregroundStyle(W.dim)
                 Spacer()
@@ -60,7 +65,7 @@ struct Fuse: View {
     private func detail(_ m: FuseModel) -> String {
         switch m.state {
         case .unknown: return "No usage yet"
-        case .ready: return "A fresh window is waiting. Your next message lights it."
+        case .ready: return W.isStarting(e.snap, at: e.date) ? "Starting your window…" : "A fresh window is waiting. Light it now, or with your next message."
         case .blocked: return "A new session window wouldn't help until then."
         case .onPace: return m.reset.map { "Lasts until the \(time($0)) reset at this pace" } ?? ""
         case .runningOut:

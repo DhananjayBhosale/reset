@@ -99,6 +99,7 @@ final class Store {
         refresh()
         // A 1 s tick keeps the countdowns live; disk is rescanned every 60 s or on demand.
         tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.onTick() }
+        startListener = StartRequest.Listener(name: StartRequest.name("claude")) { [weak self] in self?.startFromWidget("claude") }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
             self?.note("Mac woke up, rescanning")
@@ -389,6 +390,7 @@ final class Store {
                         "planMonthly": usage.planMonthlyUSD]
         out["autoStartLog"] = kickLog.suffix(5).map { ["id": $0.id, "time": iso.string(from: $0.time), "kind": $0.kind, "summary": $0.summary] }
         out["autoStartNeedsSignIn"] = autoStartNeedsSignIn
+        out["activity"] = Array(log.prefix(10))
         out["logFormat"] = ["verdict": usage.format.verdict.rawValue, "summary": usage.format.summary,
                             "checked": usage.format.checked, "lines": usage.format.lines, "problems": usage.format.problems]
         out["statusLine"] = (try? String(contentsOf: WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("statusline.txt"))) ?? NSNull()
@@ -587,6 +589,7 @@ final class Store {
         let mdays = Self.monthBuckets(usage.calls, monthStart: monthStart, daysInMonth: daysInMonth, calendar: cal)
         snap.monthDays = mdays.map { ($0 * 100).rounded() / 100 }
         snap.claudeRunsOutAt = forecast.runsOutAt
+        snap.startingAt = widgetStarting["claude"]
         snap.limitDays = Array(Set(usage.limitHits.filter { $0 >= monthStart }.map { cal.component(.day, from: $0) })).sorted()
 
         let enc = JSONEncoder(); enc.outputFormatting = .sortedKeys
@@ -646,10 +649,41 @@ final class Store {
         alerts.sendTest(server: ntfyServer, topic: ntfyTopic, log: note)
     }
 
+    // MARK: Start now, from a widget
+
+    private var startListener: StartRequest.Listener?
+    /// When a widget's "Start now" began a start, so the widget can say "Starting…" until it's done.
+    private var widgetStarting: [String: Date] = [:]
+
+    /// Any process on the Mac can post the request's name, so it only ever starts a window when one is
+    /// actually waiting: at most one start per window, never a second while a window runs.
+    static func shouldStartFromWidget(_ s: WindowStatus?, command: String?, kicking: Bool, demo: Bool, now: Date = Date()) -> Bool {
+        guard !demo, !kicking, let s, s.state == .ready, !(command ?? "").isEmpty else { return false }
+        if let b = s.blockedUntil, b > now { return false }
+        return true
+    }
+
+    func startFromWidget(_ id: String) {
+        let s = statuses.first { $0.id == id }
+        // A marker older than a run's limit is left over from a start that never reported back; ignore it.
+        let kicking = widgetStarting[id].map { Date().timeIntervalSince($0) < 240 } ?? false
+        guard Self.shouldStartFromWidget(s, command: commands[id], kicking: kicking, demo: Demo.isOn) else {
+            note("Start now from a widget ignored: \(s?.state == .ready ? "already starting" : "a window is already running")")
+            return
+        }
+        note("Start now pressed in a widget")
+        widgetStarting[id] = Date()
+        writeWidgetSnapshot()
+        // A button press is worth one reload of its own, so "Starting…" shows at once.
+        WidgetCenter.shared.reloadAllTimelines()
+        kickNow(id)
+    }
+
     func kickNow(_ id: String) {
-        guard let cmd = commands[id], let s = statuses.first(where: { $0.id == id }) else { return }
+        guard let cmd = commands[id], let s = statuses.first(where: { $0.id == id }) else { widgetStarting[id] = nil; return }
         kicker.kick(id, name: s.name, command: cmd, force: true, log: note) { [weak self] outcome in
             guard let self else { return }
+            self.widgetStarting[id] = nil
             // A start you asked for gets the same record and sign-in handling as an automatic one.
             self.recordKick(id, outcome)
             if outcome == .signedOut {

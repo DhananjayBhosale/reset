@@ -5,7 +5,8 @@ import XCTest
 /// recently turns into a warning in Settings.
 final class FormatWatchTests: XCTestCase {
     private var dir: URL!
-    private static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    /// The fixtures copied into the test bundle (see project.yml), so the repo's folder is never read.
+    private static let fixtures = Bundle(for: FormatWatchTests.self).resourceURL!.appendingPathComponent("Fixtures")
 
     override func setUp() {
         dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -26,7 +27,7 @@ final class FormatWatchTests: XCTestCase {
 
     func testRealFormatFixturesHaveNoProblems() {
         for name in ["streamed", "quota", "resumed/original", "resumed/resumed"] {
-            let u = Self.repo.appendingPathComponent("Fixtures/transcripts/claude/\(name).jsonl")
+            let u = Self.fixtures.appendingPathComponent("transcripts/claude/\(name).jsonl")
             let size = (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             let h = ClaudeUsageScanner.parse(u, mtime: Date(), size: size, from: 0).health!
             XCTAssertEqual(h.problems, [:], name)

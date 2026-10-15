@@ -5,14 +5,18 @@ import XCTest
 /// compares the result with the golden JSON in Fixtures/golden. A difference means parser behaviour changed;
 /// see "When the drift check fails" in the README.
 ///
-/// scripts/drift-check.sh runs only this class. `--update-goldens` (environment RESET_UPDATE_GOLDENS=1 in the
-/// test process) rewrites the goldens instead of comparing. The actual output always lands in
-/// build/drift/actual, so a failure can be read with `diff -u`.
+/// scripts/drift-check.sh runs only this class. The fixtures are read from the copy inside the test bundle, and
+/// output goes to the user's temporary folder (reset-drift/), so the test process never touches the repo, which
+/// may live in a privacy-protected folder. `--update-goldens` (RESET_UPDATE_GOLDENS=1 in the test process)
+/// writes new goldens to reset-drift/golden for the script to copy into the repo; actual output always lands in
+/// reset-drift/actual, so a failure can be read with `diff -u`.
 final class DriftTests: XCTestCase {
-    private static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-    private let transcripts = repo.appendingPathComponent("Fixtures/transcripts")
-    private let golden = repo.appendingPathComponent("Fixtures/golden")
-    private let actual = repo.appendingPathComponent("build/drift/actual")
+    private static let fixtures = Bundle(for: DriftTests.self).resourceURL!.appendingPathComponent("Fixtures")
+    private static let out = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("reset-drift")
+    private let transcripts = fixtures.appendingPathComponent("transcripts")
+    private let golden = fixtures.appendingPathComponent("golden")
+    private let actual = out.appendingPathComponent("actual")
+    private let updated = out.appendingPathComponent("golden")
     private var updating: Bool { ProcessInfo.processInfo.environment["RESET_UPDATE_GOLDENS"] == "1" }
 
     private static let iso: ISO8601DateFormatter = {
@@ -159,8 +163,9 @@ final class DriftTests: XCTestCase {
         try data.write(to: a, options: .atomic)
         let g = golden.appendingPathComponent(rel)
         if updating {
-            try fm.createDirectory(at: g.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: g, options: .atomic)
+            let u = updated.appendingPathComponent(rel)
+            try fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: u, options: .atomic)
             return
         }
         guard let expected = try? Data(contentsOf: g) else {
@@ -176,7 +181,7 @@ final class DriftTests: XCTestCase {
             Drift in Fixtures/golden/\(rel) at line \(i + 1):
               golden: \(i < e.count ? e[i] : "<end>")
               actual: \(i < n.count ? n[i] : "<end>")
-            Full diff: diff -u Fixtures/golden/\(rel) build/drift/actual/\(rel)
+            Full diff: diff -u Fixtures/golden/\(rel) \(actual.appendingPathComponent(rel).path)
             """, file: file, line: line)
     }
 }

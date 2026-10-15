@@ -12,6 +12,8 @@ fi
 [[ -n "$DEVELOPER_DIR" ]] && export DEVELOPER_DIR
 
 xcodegen generate --quiet
-xcodebuild test -project Reset.xcodeproj -scheme Reset -configuration Debug -derivedDataPath build/TestDerived \
+# The test copy of the app is built outside the repo: when the repo sits in a protected folder such as Desktop,
+# a test app running from there makes macOS ask for access again on every rebuild.
+xcodebuild test -project Reset.xcodeproj -scheme Reset -configuration Debug -derivedDataPath "$HOME/Library/Caches/Reset/TestDerived" \
   -destination 'platform=macOS' CODE_SIGN_IDENTITY=- 2>&1 \
   | grep -E "error:|passed \(|failed \(|Executed [0-9]+ tests|TEST (SUCCEEDED|FAILED)" | grep -v "Test Suite"
