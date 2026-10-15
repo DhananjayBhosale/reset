@@ -67,8 +67,20 @@ struct MenuBarLabel: View {
             }
     }
 
+    /// "pill" (default) or "text", from Settings → Appearance.
+    @AppStorage("menuBarStyle") private var style = "pill"
+
     @ViewBuilder private var label: some View {
-        if let r = store.readyForBar {
+        if style == "pill", let g = store.glance {
+            if g.tone == .blocked {
+                // Nothing to act on during a weekly limit, so no colour: a moon and when it lifts, in the bar's own ink.
+                Text("\(Image(systemName: "moon.zzz.fill")) \(g.text)").monospacedDigit()
+            } else if let img = MenuBarPill.image(g) {
+                Image(nsImage: img)
+            } else {
+                Text(g.text).monospacedDigit()
+            }
+        } else if let r = store.readyForBar {
             Text("\(r.name.prefix(1)) ready")
         } else if let s = store.soonest, let at = s.resetsAt {
             if store.liveNeedsSignIn && s.id == "claude" {

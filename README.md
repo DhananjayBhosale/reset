@@ -12,7 +12,7 @@ Everything it reads stays on your Mac.
 
 ## What it does
 
-- **Countdown to your next window.** A menu bar timer for Claude's 5-hour session window, exact when live usage is on and estimated from your activity when it isn't.
+- **Your window at a glance.** A colored pill in the menu bar: orange "2:46 · 42%" as usual, red when the window is nearly empty or your pace runs out before the reset ("2:00 · out 11:19"), green "ready" when a fresh window is waiting. Exact when live usage is on; estimated from your activity when it isn't, and labelled as such.
 - **Phone alerts while your Mac sleeps.** Reset queues each reset alert on an [ntfy](https://ntfy.sh) server ahead of time, so it arrives on your phone even with the lid closed.
 - **Limit forecast.** At your current pace, will you hit the limit before the reset? Reset warns you once per window, on your Mac and your phone.
 - **Auto-start.** Optional. When a window runs out, Reset sends a one-word prompt so the next window starts right away instead of when you wake up.
@@ -23,6 +23,8 @@ Everything it reads stays on your Mac.
 - **Claude Code integration.** A status line for your terminal and an MCP server, so Claude can check how much window is left and pace itself, including a per-task budget that tells it when to wrap up or switch to a smaller model.
 - **Stay awake.** Keeps the Mac from idle-sleeping (when plugged in, or always) so auto-start and alerts run on time, without a separate app. The display still sleeps.
 - **One-minute setup.** A first-run guide picks your tools, signs Claude Code in, sets up phone alerts with a QR code, and takes your plan price.
+
+<p align="center"><img src="docs/menubar.png" width="720" alt="Menu bar pill: as usual, almost empty, pace runs out first, fresh window waiting, weekly limit"></p>
 
 <p align="center"><img src="docs/dashboard.png" width="820" alt="Dashboard"></p>
 

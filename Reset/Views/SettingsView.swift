@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var topicDraft = ""
     /// Remembered between openings; `-settingsTab advanced` on the command line opens a given tab (for renders).
     @AppStorage("settingsTab") private var tab = "general"
+    @AppStorage("menuBarStyle") private var menuBarStyle = "pill"
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -215,6 +216,16 @@ struct SettingsView: View {
                 Text("Look")
             } footer: {
                 Text("How each provider is drawn in the menu.").foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker("Menu bar", selection: $menuBarStyle) {
+                    Text("Colored pill").tag("pill")
+                    Text("Text").tag("text")
+                }
+            } footer: {
+                Text("Colored pill: the countdown and what's left, orange as usual, red when the window is nearly empty or your pace runs out before the reset, green when a fresh window is waiting. Text: just the countdown.")
+                    .foregroundStyle(.secondary)
             }
 
             Section {

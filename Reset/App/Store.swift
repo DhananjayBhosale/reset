@@ -37,7 +37,8 @@ final class Store {
         }
     }
     let liveClaude = LiveClaude()
-    let forecast = Forecast()
+    /// Saved across restarts, except in demo mode, which mustn't touch real files.
+    let forecast = Forecast(storeURL: Demo.isOn ? nil : Forecast.defaultURL)
     var look: Look = Look(rawValue: UserDefaults.standard.string(forKey: "look") ?? "") ?? .glow {
         didSet { UserDefaults.standard.set(look.rawValue, forKey: "look"); lastWidgetData = nil; writeWidgetSnapshot() }
     }
@@ -186,6 +187,17 @@ final class Store {
 
     var soonest: WindowStatus? {
         barCandidates.filter { $0.resetsAt != nil }.min { $0.resetsAt! < $1.resetsAt! }
+    }
+
+    /// A tracked provider whose longer (weekly) limit is used up, which the menu bar shows ahead of everything.
+    var blockedForBar: WindowStatus? {
+        barCandidates.first { ($0.blockedUntil ?? .distantPast) > now }
+    }
+
+    /// What the menu bar shows right now (see MenuBarGlance).
+    var glance: MenuBarGlance? {
+        MenuBarGlance.make(ready: readyForBar, soonest: soonest, blocked: blockedForBar, runsOutAt: forecast.runsOutAt,
+                           signedOut: liveNeedsSignIn, now: now)
     }
 
     /// A tracked provider with a fresh window waiting, shown in the bar ahead of any countdown.

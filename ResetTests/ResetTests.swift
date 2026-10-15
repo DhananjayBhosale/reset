@@ -261,3 +261,48 @@ final class MonthBucketTests: XCTestCase {
         XCTAssertEqual(b.reduce(0, +), 5)
     }
 }
+
+/// The forecast survives a restart: same projection afterwards, and no second warning for the same window.
+final class ForecastPersistenceTests: XCTestCase {
+    private var url: URL!
+    override func setUp() { url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-forecast.json") }
+    override func tearDown() { try? FileManager.default.removeItem(at: url) }
+
+    func testProjectionAndWarningSurviveARestart() {
+        let start = Date(timeIntervalSince1970: 1_772_442_000), reset = start.addingTimeInterval(7200)
+        let before = Forecast(storeURL: url, now: start)
+        for m in 0...15 { before.record(used: 40 + Double(m), resetsAt: reset, now: start.addingTimeInterval(Double(m) * 60)) }
+        XCTAssertNotNil(before.runsOutAt)
+        XCTAssertTrue(before.shouldWarn())
+        // Reset quits and starts again two minutes later.
+        let after = Forecast(storeURL: url, now: start.addingTimeInterval(17 * 60))
+        XCTAssertNotNil(after.runsOutAt, "the run-out warning is there straight away")
+        XCTAssertEqual(after.runsOutAt!.timeIntervalSince1970, before.runsOutAt!.timeIntervalSince1970, accuracy: 120)
+        XCTAssertFalse(after.shouldWarn(), "already warned for this window, so no second notification or push")
+    }
+
+    func testAnEndedWindowIsDropped() {
+        let start = Date(timeIntervalSince1970: 1_772_442_000), reset = start.addingTimeInterval(1800)
+        let before = Forecast(storeURL: url, now: start)
+        for m in 0...15 { before.record(used: 40 + Double(m), resetsAt: reset, now: start.addingTimeInterval(Double(m) * 60)) }
+        let after = Forecast(storeURL: url, now: reset.addingTimeInterval(60))
+        XCTAssertNil(after.runsOutAt)
+        XCTAssertTrue(after.readings.isEmpty)
+    }
+
+    func testOldReadingsAreDroppedOnLoad() {
+        let start = Date(timeIntervalSince1970: 1_772_442_000), reset = start.addingTimeInterval(5 * 3600)
+        let before = Forecast(storeURL: url, now: start)
+        for m in 0...15 { before.record(used: 40 + Double(m), resetsAt: reset, now: start.addingTimeInterval(Double(m) * 60)) }
+        // An hour later every reading is older than the 45-minute span the projection uses.
+        let after = Forecast(storeURL: url, now: start.addingTimeInterval(75 * 60))
+        XCTAssertTrue(after.readings.isEmpty)
+        XCTAssertNil(after.runsOutAt, "nothing stale is projected")
+    }
+
+    func testWithoutAStoreNothingIsWritten() {
+        let f = Forecast()
+        f.record(used: 10, resetsAt: Date().addingTimeInterval(3600))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+}
