@@ -1,0 +1,169 @@
+import Foundation
+import UserNotifications
+
+/// Mac notifications are scheduled with the system, so they fire on time even if Reset is busy.
+/// Phone alerts go through ntfy with a server-side delivery time ("At" header), so they still
+/// arrive when the Mac is asleep or the lid is closed.
+final class Alerts {
+    private let center = UNUserNotificationCenter.current()
+    private let prefix = "reset-"
+
+    func requestPermission() {
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    /// Minute precision, so a reset time that wobbles by a second keeps the same identity.
+    static func minuteKey(_ d: Date) -> Int { Int((d.timeIntervalSince1970 / 60).rounded()) }
+
+    func sync(_ windows: [WindowStatus], leadMinutes: Int) {
+        let now = Date()
+        var wanted: [String: UNNotificationRequest] = [:]
+        for w in windows {
+            guard let at = w.resetsAt, at > now else { continue }
+            let id = "\(prefix)\(w.id)-\(Self.minuteKey(at))"
+            let body = w.blockedUntil.map { "Session window is fresh, but the \(w.secondary?.label.lowercased() ?? "longer") limit lasts until \(Fmt.when($0))." }
+                ?? "A fresh window is ready. Send a message to start it."
+            wanted[id] = request(id: id, title: "\(w.name) has reset", body: body, at: at)
+            if leadMinutes > 0 {
+                let early = at.addingTimeInterval(TimeInterval(-leadMinutes * 60))
+                if early > now {
+                    let lid = "\(id)-lead\(leadMinutes)"
+                    wanted[lid] = request(id: lid, title: "\(w.name) resets in \(leadMinutes) min",
+                                          body: "At \(Fmt.clock.string(from: at)).", at: early)
+                }
+            }
+        }
+        center.getPendingNotificationRequests { [center, prefix] pending in
+            let have = Set(pending.map(\.identifier).filter { $0.hasPrefix(prefix) })
+            let stale = have.subtracting(wanted.keys)
+            if !stale.isEmpty { center.removePendingNotificationRequests(withIdentifiers: Array(stale)) }
+            for (id, req) in wanted where !have.contains(id) { center.add(req) }
+        }
+    }
+
+    private func request(id: String, title: String, body: String, at: Date) -> UNNotificationRequest {
+        let c = UNMutableNotificationContent()
+        c.title = title
+        c.body = body
+        c.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, at.timeIntervalSinceNow), repeats: false)
+        return UNNotificationRequest(identifier: id, content: c, trigger: trigger)
+    }
+
+    func notifyNow(title: String, body: String) {
+        let c = UNMutableNotificationContent()
+        c.title = title; c.body = body; c.sound = .default
+        center.add(UNNotificationRequest(identifier: "\(prefix)forecast-\(Int(Date().timeIntervalSince1970))", content: c,
+                                         trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)))
+    }
+
+    func pushNow(title: String, body: String, server: String, topic: String, log: @escaping (String) -> Void) {
+        guard let url = Self.endpoint(server: server, topic: topic) else { return }
+        post(url: url, sid: nil, title: title, body: body, at: nil, priority: 4, log: log) { _ in }
+    }
+
+    // MARK: Phone (ntfy)
+
+    /// What is queued on the ntfy server, per provider. Each provider uses one ntfy sequence ID, so
+    /// posting again replaces the pending push and DELETE withdraws it.
+    private struct Queued: Codable { var destination: String; var minute: Int; var at: Date }
+    private var queued: [String: Queued] = {
+        UserDefaults.standard.data(forKey: "ntfyQueued").flatMap { try? JSONDecoder().decode([String: Queued].self, from: $0) } ?? [:]
+    }()
+    private var inFlight: Set<String> = []
+
+    private func saveQueued() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(queued), forKey: "ntfyQueued")
+    }
+
+    static func endpoint(server: String, topic: String) -> URL? {
+        let base = server.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let t = topic.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty, t.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil,
+              base.hasPrefix("https://") || base.hasPrefix("http://") else { return nil }
+        return URL(string: "\(base)/\(t)")
+    }
+
+    /// Main-thread only. `windows` are the providers that should alert; anything queued for a provider
+    /// no longer in that list (or whose time moved) is replaced or withdrawn.
+    func syncPhone(_ windows: [WindowStatus], server: String, topic: String, enabled: Bool,
+                   log: @escaping (String) -> Void) {
+        let now = Date()
+        let dest = Self.endpoint(server: server, topic: topic)
+        var want: [String: Date] = [:]
+        if enabled, dest != nil {
+            for w in windows {
+                // ntfy accepts delivery times between 10 s and 3 days out.
+                if let at = w.resetsAt, at.timeIntervalSince(now) > 15, at.timeIntervalSince(now) < 3 * 86400 {
+                    want[w.id] = at
+                }
+            }
+        }
+        // Withdraw pushes that should no longer go out.
+        for (id, q) in queued where want[id] == nil || q.destination != dest?.absoluteString {
+            guard !inFlight.contains(id) else { continue }
+            queued[id] = nil
+            if q.at > now, let url = URL(string: q.destination) { delete(url: url, sid: Self.sid(id), log: log) }
+        }
+        saveQueued()
+        guard let dest else { return }
+        for w in windows {
+            guard let at = want[w.id], !inFlight.contains(w.id) else { continue }
+            let minute = Self.minuteKey(at)
+            if let q = queued[w.id], q.minute == minute, q.destination == dest.absoluteString { continue }
+            inFlight.insert(w.id)
+            let id = w.id
+            post(url: dest, sid: Self.sid(id), title: "\(w.name) has reset",
+                 body: "Fresh window ready since \(Fmt.clock.string(from: at)).", at: at, priority: 4, log: log) { [weak self] ok in
+                guard let self else { return }
+                self.inFlight.remove(id)
+                guard ok else { return }  // not recorded, so the next rescan retries
+                self.queued[id] = Queued(destination: dest.absoluteString, minute: minute, at: at)
+                self.saveQueued()
+            }
+        }
+    }
+
+    static func sid(_ providerId: String) -> String { "reset-\(providerId)" }
+
+    func sendTest(server: String, topic: String, log: @escaping (String) -> Void) {
+        guard let url = Self.endpoint(server: server, topic: topic) else {
+            log("Phone test not sent: topic must be letters, numbers, - or _")
+            return
+        }
+        post(url: url, sid: nil, title: "Reset test", body: "Phone alerts are working.", at: nil, priority: 3, log: log) { _ in }
+    }
+
+    private func post(url: URL, sid: String?, title: String, body: String, at: Date?, priority: Int,
+                      log: @escaping (String) -> Void, done: @escaping (Bool) -> Void) {
+        var req = URLRequest(url: url, timeoutInterval: 20)
+        req.httpMethod = "POST"
+        req.httpBody = Data(body.utf8)
+        req.setValue(title, forHTTPHeaderField: "Title")
+        req.setValue("hourglass", forHTTPHeaderField: "Tags")
+        req.setValue(String(priority), forHTTPHeaderField: "Priority")
+        if let sid { req.setValue(sid, forHTTPHeaderField: "X-Sequence-ID") }
+        if let at { req.setValue(String(Int(at.timeIntervalSince1970)), forHTTPHeaderField: "At") }
+        URLSession.shared.dataTask(with: req) { _, resp, err in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let ok = err == nil && (200..<300).contains(code)
+            DispatchQueue.main.async {
+                if let err { log("Phone push failed: \(err.localizedDescription). Will retry") }
+                else if !ok { log("Phone push failed: HTTP \(code). Will retry") }
+                else { log(at.map { "Phone push queued for \(Fmt.when($0))" } ?? "Phone test sent") }
+                done(ok)
+            }
+        }.resume()
+    }
+
+    private func delete(url: URL, sid: String, log: @escaping (String) -> Void) {
+        var req = URLRequest(url: url.appendingPathComponent(sid), timeoutInterval: 20)
+        req.httpMethod = "DELETE"
+        URLSession.shared.dataTask(with: req) { _, resp, err in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            DispatchQueue.main.async {
+                log(err == nil && (200..<300).contains(code) ? "Withdrew a queued phone push" : "Could not withdraw a queued phone push (HTTP \(code))")
+            }
+        }.resume()
+    }
+}

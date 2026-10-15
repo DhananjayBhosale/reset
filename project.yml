@@ -1,0 +1,65 @@
+name: Reset
+options:
+  bundleIdPrefix: in.trak
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    # Ad-hoc by default so anyone can build. scripts/build.sh passes your team when TEAM is set,
+    # which macOS needs before it will list the widgets.
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Reset:
+    type: application
+    platform: macOS
+    sources:
+      - Reset
+    dependencies:
+      - target: ResetWidgets
+        embed: true
+      - target: reset-mcp
+        embed: true
+        copy:
+          destination: executables
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: in.trak.reset
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Reset
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        ARCHS: "$(ARCHS_STANDARD)"
+  ResetWidgets:
+    type: app-extension
+    platform: macOS
+    sources:
+      - ResetWidgets
+      - Reset/Shared
+      - path: Reset/Resources/Mascots
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: in.trak.reset.widgets
+        INFOPLIST_FILE: ResetWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ResetWidgets/ResetWidgets.entitlements
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
+  reset-mcp:
+    type: tool
+    platform: macOS
+    sources:
+      - ResetMCP
+      - Reset/Shared/WidgetSnapshot.swift
+      - Reset/Shared/Looks.swift
+    settings:
+      base:
+        PRODUCT_NAME: reset-mcp
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES

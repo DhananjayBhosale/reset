@@ -1,0 +1,202 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @Bindable var store: Store
+    @State private var newName = ""
+    @State private var newHours = 5.0
+    @State private var topicDraft = ""
+
+    var body: some View {
+        @Bindable var m = store.mascots
+        Form {
+            Section("Providers") {
+                ForEach(builtIns, id: \.0) { id, name in
+                    providerRow(id: id, name: name)
+                }
+            }
+
+            Section {
+                ForEach(store.custom) { c in
+                    HStack {
+                        Text(c.name)
+                        Text("\(c.windowHours, specifier: "%g")h window").foregroundStyle(.secondary)
+                        Spacer()
+                        Toggle("Alert", isOn: binding("custom-" + c.id, \.alert)).toggleStyle(.checkbox)
+                        Button(role: .destructive) { store.custom.removeAll { $0.id == c.id } } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                HStack {
+                    TextField("Name, e.g. ChatGPT", text: $newName)
+                    Stepper("\(newHours, specifier: "%g")h", value: $newHours, in: 0.5...168, step: 0.5)
+                        .frame(width: 110)
+                    Button("Add") {
+                        store.custom.append(CustomProvider(name: newName.trimmingCharacters(in: .whitespaces),
+                                                           windowHours: newHours))
+                        newName = ""
+                    }
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } header: {
+                Text("Other tools")
+            } footer: {
+                Text("For tools Reset cannot read on its own. Press Started now in the menu when you begin, and Reset counts down the window.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 14) {
+                    ForEach(Look.allCases) { look in
+                        Button { store.look = look } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                LookCard(look: look, d: sampleCard, now: store.now)
+                                    .frame(width: 340, height: 128)
+                                    .scaleEffect(0.62, anchor: .topLeading)
+                                    .frame(width: 211, height: 80, alignment: .topLeading)
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(store.look == look ? Color.accentColor : .clear, lineWidth: 2.5))
+                                Text(look.name).font(.system(size: 12, weight: store.look == look ? .semibold : .regular))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Look")
+            } footer: {
+                Text("How each provider is drawn in the menu and the Reset card widget.").foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Show mascots", isOn: $m.enabled)
+                Picker("Where they live", selection: $m.placement) {
+                    ForEach(Placement.allCases) { Text($0.label).tag($0) }
+                }
+                .disabled(!store.mascots.enabled)
+                HStack {
+                    Text("Size")
+                    Slider(value: $m.size, in: 56...140, step: 4)
+                }
+                .disabled(!store.mascots.enabled)
+                ForEach(MascotArt.providers.filter { id in store.statuses.contains { $0.id == id } }, id: \.self) { id in
+                    Toggle(store.statuses.first { $0.id == id }?.name ?? id, isOn: Binding(
+                        get: { !store.mascots.hidden.contains(id) },
+                        set: { v in if v { store.mascots.hidden.remove(id) } else { store.mascots.hidden.insert(id) } }))
+                        .toggleStyle(.checkbox)
+                }
+            } header: {
+                Text("Mascots")
+            } footer: {
+                Text("Each mascot's mood and health bar follow how much of its window is left. Drag one to move it, right-click to change where they live. Mascots only show for providers switched on above.\n\nThe mascots are unofficial fan art based on the Claude, OpenAI, Gemini and Antigravity logos. Those names and logos belong to Anthropic, OpenAI and Google, who have nothing to do with Reset.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker("Heads-up before reset", selection: $store.leadMinutes) {
+                    Text("Off").tag(0)
+                    ForEach([5, 10, 15, 30], id: \.self) { Text("\($0) min").tag($0) }
+                }
+            } header: {
+                Text("Mac alerts")
+            }
+
+            Section {
+                Toggle("Send reset alerts to my phone", isOn: $store.phoneEnabled)
+                TextField("ntfy server", text: $store.ntfyServer)
+                HStack {
+                    TextField("Topic", text: $topicDraft, prompt: Text("a long random name only you know"))
+                        .onSubmit { store.ntfyTopic = topicDraft }
+                    Button("Save") { store.ntfyTopic = topicDraft }
+                        .disabled(topicDraft == store.ntfyTopic || Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) == nil)
+                }
+                HStack {
+                    Button("Send test") { store.sendTestPush() }.disabled(store.ntfyTopic.isEmpty)
+                    Spacer()
+                    if Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) == nil && !topicDraft.isEmpty {
+                        Text("Letters, numbers, - and _ only").font(.caption).foregroundStyle(.red)
+                    }
+                }
+            } header: {
+                Text("Phone alerts")
+            } footer: {
+                Text("Install the free ntfy app on your phone and subscribe to the same topic. Each alert is queued on the ntfy server with its delivery time, so it still arrives when this Mac is asleep, and it is replaced or withdrawn if the reset time changes. Alerts are sent at high priority; to break through Do Not Disturb, allow it for that priority in the ntfy app. Anyone who knows the topic name can read it, so pick something unguessable.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("General") {
+                Toggle("Open at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.launchAtLogin = $0 }))
+            }
+
+            Section("About") {
+                HStack {
+                    Text("Reset \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                    Spacer()
+                    Link("Source on GitHub", destination: URL(string: ResetInfo.repoURL)!)
+                }
+                Text("Free and open source under the MIT license. Everything Reset reads stays on this Mac; the only things it sends out are the optional live Claude usage check (to Anthropic) and phone alerts (to the ntfy server you choose). Not affiliated with Anthropic, OpenAI or Google.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Activity") {
+                if store.log.isEmpty { Text("Nothing yet").foregroundStyle(.secondary) }
+                ForEach(Array(store.log.enumerated()), id: \.offset) { Text($0.element).font(.system(size: 11, design: .monospaced)) }
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 520, height: 720)
+        .onAppear { topicDraft = store.ntfyTopic }
+    }
+
+    private let builtIns = [("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini CLI"), ("antigravity", "Antigravity")]
+
+    @ViewBuilder private func providerRow(id: String, name: String) -> some View {
+        let status = store.statuses.first { $0.id == id }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Toggle(name, isOn: binding(id, \.enabled))
+                Spacer()
+                Toggle("Alert", isOn: binding(id, \.alert)).toggleStyle(.checkbox)
+                if status?.canAutoStart ?? (id != "gemini") {
+                    Toggle("Auto-start", isOn: binding(id, \.autoStart)).toggleStyle(.checkbox)
+                }
+            }
+            if let status { Text(status.source).font(.caption).foregroundStyle(.secondary) }
+            if id == "claude" {
+                Toggle("Live usage from your Claude account", isOn: $store.liveClaudeEnabled)
+                Text("Exact % and reset time, every 3 minutes. Reads Claude Code's sign-in from your Keychain (macOS may ask once) and sends it only to api.anthropic.com. Usage numbers only, never chats.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if store.liveClaudeEnabled {
+                    Text(liveText).font(.caption).foregroundStyle(liveIsProblem ? Color.orange : Color.secondary)
+                }
+            }
+            if store.prefs(for: id).autoStart {
+                TextField("Command", text: Binding(get: { store.commands[id] ?? "" },
+                                                   set: { store.commands[id] = $0 }))
+                    .font(.system(size: 11, design: .monospaced))
+                Text("Runs once, two minutes after a window Reset was watching runs out, while the Mac is awake. Turning this on does not run it now. Skipped while a weekly limit is exhausted. Uses a little of your quota each time.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var sampleCard: CardData {
+        if let c = store.statuses.first(where: { $0.id == "claude" }) { return store.cardData(for: c) }
+        return CardData(id: "claude", name: "Claude", color: Theme.color(for: "claude"), resetsAt: Date().addingTimeInterval(6000), ready: false, used: 58)
+    }
+
+    private var liveText: String {
+        switch store.liveClaude.state {
+        case .off, .loading: return "Connecting…"
+        case .ok(let d): return "Live · updated \(Fmt.clock.string(from: d))"
+        case .problem(let why): return why
+        }
+    }
+    private var liveIsProblem: Bool { if case .problem = store.liveClaude.state { return true }; return false }
+
+    private func binding(_ id: String, _ key: WritableKeyPath<ProviderPrefs, Bool>) -> Binding<Bool> {
+        Binding(get: { store.prefs(for: id)[keyPath: key] },
+                set: { v in store.setPrefs(id) { $0[keyPath: key] = v } })
+    }
+}
