@@ -255,7 +255,7 @@ struct DashboardView: View {
                                 }
                             }
                         }
-                    if let b = store.budget { budgetLine(b, used: c?.state == .ready ? 0 : c?.usedPercent) }
+                    if let b = store.budget { budgetLine(b, used: store.budgetUsed) }
                 }
             }
             .frame(height: 312)

@@ -57,6 +57,15 @@ final class BudgetTests: XCTestCase {
         XCTAssertTrue(without.advice(used: nil).contains("can't be checked"))
     }
 
+    func testStatusLineTag() {
+        let b = Budget(task: "A long task name that stays off the status line", maxPercent: 60, downshiftModel: "haiku", setAt: now)
+        XCTAssertEqual(b.tag(used: 30), "budget 60%")
+        XCTAssertEqual(b.tag(used: 50), "budget 60% wrap up")
+        XCTAssertEqual(b.tag(used: 61), "budget 60% over, use haiku")
+        XCTAssertEqual(b.tag(used: nil), "budget 60% (usage unknown)")
+        XCTAssertEqual(Budget(task: "t", maxPercent: 40, downshiftModel: nil, setAt: now).tag(used: 45), "budget 40% over, stop")
+    }
+
     func testSaveLoadClearRoundTrip() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: dir) }

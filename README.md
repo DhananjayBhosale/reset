@@ -120,7 +120,7 @@ The fixtures are frozen files, so a failure means **Reset's parsing changed**, n
 - **You changed a parser on purpose:** read the diff (`diff -ru Fixtures/golden build/drift/actual`). If every difference is one you intended, run `--update-goldens` and commit the new goldens with the parser change.
 - **You didn't mean to change anything:** treat it as a regression and fix the code, not the golden.
 
-**After a Claude Code (or Codex, or Claude desktop) update**, the goldens won't fail by themselves, because they don't read your live logs. To check a new format:
+**After a Claude Code update**, Reset watches for you: while scanning, it counts recent transcript rows that look like usage but can't be read (bad JSON, a timestamp it can't parse, a missing message, id, model or token counts, token counts that aren't numbers, an unknown limit kind), and notices when Claude Code writes plenty of log lines with no usage in them at all. If that happens in the last 2 days, Settings shows a warning at the top naming the Claude Code version. Healthy logs show one quiet line under Settings → About. It runs on your Mac and sends nothing. The goldens themselves won't fail, because they don't read your live logs. To capture a new format for them:
 
 1. Copy a few fresh rows of the changed kind from `~/.claude/projects/…/*.jsonl` (or the other source).
 2. Anonymise them: replace ids, uuids, session ids, request ids, `cwd`, org ids, and all prompt, reply, thinking and signature text. Keep every key and the shape and types of every value; that's what the parsers depend on.

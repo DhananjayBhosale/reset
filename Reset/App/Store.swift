@@ -131,13 +131,23 @@ final class Store {
     func reloadBudget() {
         let b = Demo.isOn ? Demo.budget : Budget.load(from: budgetURL)
         // Assigning an equal value would still wake every view observing it.
-        if b != budget { budget = b }
+        guard b != budget else { return }
+        budget = b
+        // The terminal status line otherwise waits up to 30 s to show a budget an agent just set.
+        writeStatusLine()
+    }
+
+    /// Window used % that budgets are judged against: 0 once a fresh window is ready, nil when unknown.
+    var budgetUsed: Double? {
+        guard let c = statuses.first(where: { $0.id == "claude" }) else { return nil }
+        return c.state == .ready ? 0 : c.usedPercent
     }
 
     func clearBudget() {
         // Demo mode never touches the real file; its made-up budget simply comes back on the next look.
         if !Demo.isOn { Budget.clear(at: budgetURL) }
         budget = nil
+        writeStatusLine()
         note("Pacing budget cleared")
     }
 
@@ -336,6 +346,7 @@ final class Store {
         }
         if let b = c.blockedUntil, b > Date() { parts.append("weekly limit until \(Fmt.when(b))") }
         if let out = forecast.runsOutAt { parts.append("runs out ~\(Fmt.clock.string(from: out))") }
+        if let b = budget { parts.append(b.tag(used: budgetUsed)) }
         let today = usage.calls.filter { Calendar.current.isDateInToday($0.time) }.reduce(0) { $0 + $1.cost }
         if today > 0 { parts.append(String(format: "$%.0f today", today)) }
         let line = "◷ " + parts.joined(separator: " · ")
@@ -368,6 +379,8 @@ final class Store {
                           "error": updater.lastError ?? NSNull(), "current": Updater.current]
         out["usage"] = ["calls": usage.calls.count, "lastScan": d(usage.lastScan), "projects": usage.projects.count,
                         "planMonthly": usage.planMonthlyUSD]
+        out["logFormat"] = ["verdict": usage.format.verdict.rawValue, "summary": usage.format.summary,
+                            "checked": usage.format.checked, "lines": usage.format.lines, "problems": usage.format.problems]
         out["statusLine"] = (try? String(contentsOf: WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("statusline.txt"))) ?? NSNull()
         out["look"] = look.rawValue
         UNUserNotificationCenter.current().getPendingNotificationRequests { reqs in

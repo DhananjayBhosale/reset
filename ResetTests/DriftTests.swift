@@ -110,7 +110,10 @@ final class DriftTests: XCTestCase {
 
     private func render(_ r: ClaudeUsageScanner.FileResult) -> [String: Any] {
         ["calls": render(r.calls), "titles": r.titles, "limitHits": r.limitHits.map(Self.iso.string),
-         "apiMillis": r.apiMillis, "offset": r.offset, "size": r.size]
+         "apiMillis": r.apiMillis, "offset": r.offset, "size": r.size,
+         "health": r.health.map { h -> [String: Any] in
+             ["lines": h.lines, "checked": h.checked, "problems": h.problems, "version": h.version ?? NSNull()]
+         } ?? NSNull()]
     }
 
     /// Sorted by time then id: the parsers return dictionary values, whose order isn't stable.

@@ -82,6 +82,18 @@ struct Budget: Codable, Equatable {
         return .normal
     }
 
+    /// Short form for the terminal status line: "budget 60%", "budget 60% wrap up", "budget 60% over, use haiku".
+    /// Leaves out the task name, which can be long and is already on the dashboard.
+    func tag(used: Double?) -> String {
+        let cap = "budget \(maxPercent)%"
+        switch status(used: used) {
+        case .normal: return cap
+        case .wrapUp: return cap + " wrap up"
+        case .over: return cap + (downshiftModel.map { " over, use \($0)" } ?? " over, stop")
+        case .unknown: return cap + " (usage unknown)"
+        }
+    }
+
     func advice(used: Double?) -> String {
         let task = "\u{201C}\(self.task)\u{201D}"
         let pace = used.map { "\(Int($0.rounded()))% of the window used, cap \(maxPercent)%" } ?? ""

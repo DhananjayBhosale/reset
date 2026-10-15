@@ -10,6 +10,27 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var m = store.mascots
         Form {
+            // Only shown when something is wrong; a healthy check is one quiet line under About.
+            if [.problems, .noRows].contains(store.usage.format.verdict) {
+                Section {
+                    Label {
+                        Text(store.usage.format.summary)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    }
+                    HStack {
+                        Button(store.updater.checking ? "Checking…" : "Check for a Reset update") { store.updater.check() }
+                            .disabled(store.updater.checking)
+                        Link("Report it on GitHub", destination: URL(string: ResetInfo.repoURL + "/issues")!)
+                    }
+                } header: {
+                    Text("Claude Code log format")
+                } footer: {
+                    Text("Reset reads Claude Code's local logs, and a Claude Code update can change how they're written. Nothing is sent anywhere by this check.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Providers") {
                 ForEach(builtIns, id: \.0) { id, name in
                     providerRow(id: id, name: name)
@@ -169,6 +190,7 @@ struct SettingsView: View {
                     Spacer()
                     Link("Source on GitHub", destination: URL(string: ResetInfo.repoURL)!)
                 }
+                Text(store.usage.format.summary).font(.caption).foregroundStyle(.secondary)
                 Text("Free and open source under the MIT license. Everything Reset reads stays on this Mac; the only things it sends out are the optional live Claude usage check (to Anthropic) and phone alerts (to the ntfy server you choose). Not affiliated with Anthropic, OpenAI or Google.")
                     .font(.caption).foregroundStyle(.secondary)
             }

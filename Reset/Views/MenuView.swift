@@ -115,11 +115,31 @@ struct MenuView: View {
             Label("At this pace you run out around \(Fmt.clock.string(from: out))", systemImage: "flame")
                 .font(.system(size: 11, weight: .medium)).foregroundStyle(Color(hex: 0xFF8A5C))
         }
+        if h.id == "claude", let b = store.budget { budgetNotice(b) }
         if let sec = h.secondary {
             Label("\(sec.label) resets \(Fmt.when(sec.resetsAt, now: store.now))\(sec.usedPercent.map { " · \(Int($0.rounded()))% used" } ?? "")",
                   systemImage: "calendar")
                 .font(.system(size: 11)).foregroundStyle(Theme.dim)
         }
+    }
+
+    /// The pacing budget an agent set through reset-mcp. Coloured once it needs attention; clearing it lives on the dashboard.
+    private func budgetNotice(_ b: Budget) -> some View {
+        let used = store.budgetUsed
+        let status = b.status(used: used)
+        let color: Color = status == .over ? Color(hex: 0xFF5C3A) : status == .wrapUp ? Color(hex: 0xFFB13D) : Theme.dim
+        let state: String = {
+            switch status {
+            case .normal: return "on pace"
+            case .wrapUp: return "wrap up"
+            case .over: return b.downshiftModel.map { "over, switch to \($0)" } ?? "over, stop"
+            case .unknown: return "usage unknown"
+            }
+        }()
+        return Label("Budget \(b.maxPercent)% · \(b.task) · \(state)", systemImage: "gauge.with.dots.needle.67percent")
+            .font(.system(size: 11, weight: status == .normal ? .regular : .medium)).foregroundStyle(color)
+            .lineLimit(1).truncationMode(.middle)
+            .help(b.advice(used: used))
     }
 
     // MARK: Numbers

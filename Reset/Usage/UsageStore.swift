@@ -58,6 +58,8 @@ final class UsageStore {
     private(set) var titles: [String: String] = [:]
     private(set) var limitHits: [Date] = []
     private(set) var apiMillis: [String: Int] = [:]
+    /// Whether Claude Code's recent logs still read cleanly; Settings warns when they don't.
+    private(set) var format = ClaudeUsageScanner.FormatReport()
     private(set) var loading = false
     /// Files parsed so far in the current scan, for the first-launch progress message.
     private(set) var filesRead = 0
@@ -122,6 +124,7 @@ final class UsageStore {
                 self.titles = r.titles
                 self.limitHits = r.limitHits
                 self.apiMillis = r.apiMillis
+                self.format = r.format
                 self.loading = false
                 self.lastScan = Date()
                 // Test hook: `--args -renderShareCard /path/card.png` writes the current card once.

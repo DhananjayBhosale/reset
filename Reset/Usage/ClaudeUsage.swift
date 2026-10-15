@@ -38,7 +38,52 @@ final class ClaudeUsageScanner {
         var apiMillis: [String: Int]
         /// Bytes parsed so far, always at a line boundary. Transcripts only grow, so the next scan starts here.
         var offset: Int = 0
+        /// What couldn't be read. Optional so caches written before it existed still decode.
+        var health: FormatHealth?
     }
+
+    /// Rows in one transcript that looked like usage but couldn't be read. Claude Code changing how it writes
+    /// its logs is the one way Reset can silently go wrong, so this is counted rather than skipped quietly.
+    struct FormatHealth: Codable, Equatable {
+        /// Complete lines read.
+        var lines = 0
+        /// Assistant rows judged, readable or not.
+        var checked = 0
+        /// FormatProblem raw value to count.
+        var problems: [String: Int] = [:]
+        /// Claude Code version on the last assistant row read, for "since version X" in the warning.
+        var version: String?
+
+        mutating func add(_ o: FormatHealth) {
+            lines += o.lines
+            checked += o.checked
+            problems.merge(o.problems, uniquingKeysWith: +)
+            if o.version != nil { version = o.version }
+        }
+    }
+
+    enum FormatProblem: String, CaseIterable {
+        case unreadableRow = "unreadable_row"
+        case noTimestamp = "no_timestamp"
+        case noMessage = "no_message"
+        case missingFields = "missing_fields"
+        case usageShape = "usage_shape"
+        case unknownLimit = "unknown_limit"
+
+        var phrase: String {
+            switch self {
+            case .unreadableRow: return "rows that aren't valid JSON"
+            case .noTimestamp: return "rows without a readable timestamp"
+            case .noMessage: return "responses without a message"
+            case .missingFields: return "responses missing their id, model or token counts"
+            case .usageShape: return "token counts in an unexpected shape"
+            case .unknownLimit: return "limit messages of a kind Reset doesn't know"
+            }
+        }
+    }
+
+    /// The limit kinds Reset understands in `quotaLimits.rateLimitType`.
+    static let knownLimitTypes: Set<String> = ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"]
 
     private var cache: [String: FileResult] = [:]
     private let cacheURL: URL = {
@@ -53,6 +98,7 @@ final class ClaudeUsageScanner {
         var titles: [String: String]
         var limitHits: [Date]
         var apiMillis: [String: Int]
+        var format = FormatReport()
     }
 
     /// Called with the number of files parsed so far during a scan that has real work to do.
@@ -82,9 +128,12 @@ final class ClaudeUsageScanner {
                 seen.insert(url.path)
                 // Fresh within 2 s: mtime round-trips through JSON and filesystems differ in precision,
                 // so exact Date equality could miss on an unchanged file and force a needless re-parse.
-                if let c = cache[url.path], abs(c.mtime.timeIntervalSince(mod)) < 2, c.size == size { results.append(c); continue }
+                // A recent file cached before format checks existed is read once more, so the check covers it.
+                let needsHealth = cache[url.path]?.health == nil && mod > Date().addingTimeInterval(-Self.recentWindow)
+                if let c = cache[url.path], abs(c.mtime.timeIntervalSince(mod)) < 2, c.size == size, !needsHealth { results.append(c); continue }
                 var r: FileResult
-                if let c = cache[url.path], size > c.offset, c.offset > 0 {
+                // Appending to a result without health would leave the check counting only the new rows.
+                if let c = cache[url.path], size > c.offset, c.offset > 0, c.health != nil {
                     // Appended to since last time: parse only the new bytes and merge.
                     r = Self.merge(c, Self.parse(url, mtime: mod, size: size, from: c.offset))
                 } else {
@@ -101,7 +150,69 @@ final class ClaudeUsageScanner {
             cache = cache.filter { seen.contains($0.key) }
             if let d = try? JSONEncoder().encode(cache) { try? d.write(to: cacheURL, options: .atomic) }
         }
-        return Self.combine(results, since: since)
+        var r = Self.combine(results, since: since)
+        r.format = Self.formatReport(results, recentSince: Date().addingTimeInterval(-Self.recentWindow))
+        return r
+    }
+
+    // MARK: Format check
+
+    /// How far back the format check looks: long enough to have real activity, short enough that a new
+    /// Claude Code version shows up instead of being averaged away by weeks of older, healthy logs.
+    static let recentWindow: TimeInterval = 48 * 3600
+
+    struct FormatReport: Equatable {
+        enum Verdict: String { case ok, problems, noRows = "no_rows", tooQuiet = "too_quiet" }
+        var verdict: Verdict = .tooQuiet
+        var lines = 0
+        var checked = 0
+        var problems: [String: Int] = [:]
+        var version: String?
+        var problemCount: Int { problems.values.reduce(0, +) }
+
+        /// One sentence for Settings and the self-test.
+        var summary: String {
+            let since = version.map { " (Claude Code \($0))" } ?? ""
+            switch verdict {
+            case .tooQuiet:
+                return "Not enough recent Claude Code activity to check the log format."
+            case .ok:
+                return "Claude Code logs read normally: \(checked) responses in the last 2 days\(since)."
+            case .noRows:
+                return "Claude Code wrote \(lines) log lines in the last 2 days but Reset found no usage in them\(since). Its log format may have changed, so usage, cost and window estimates may be missing."
+            case .problems:
+                let worst = problems.max { $0.value < $1.value }
+                let what = worst.flatMap { FormatProblem(rawValue: $0.key)?.phrase } ?? "rows"
+                return "Reset couldn't read \(problemCount) of \(checked) recent Claude Code responses, mostly \(what)\(since). Its log format may have changed, so usage and cost may be undercounted."
+            }
+        }
+    }
+
+    /// Thresholds, from a baseline of zero problems in 36,500 real responses over 30 days: a few unreadable
+    /// rows are already unusual, but one stray row shouldn't raise an alarm.
+    static let minLines = 200, minProblems = 3, problemShare = 0.02, noRowsLines = 500
+
+    /// Judges the files written to recently. Pure, so it's tested directly.
+    static func formatReport(_ results: [FileResult], recentSince: Date) -> FormatReport {
+        var total = FormatHealth()
+        var newest: (Date, String)?
+        for r in results where r.mtime >= recentSince {
+            guard let h = r.health else { continue }
+            total.add(h)
+            if let v = h.version, newest.map({ r.mtime > $0.0 }) ?? true { newest = (r.mtime, v) }
+        }
+        var out = FormatReport(lines: total.lines, checked: total.checked, problems: total.problems, version: newest?.1)
+        if total.lines < minLines {
+            out.verdict = .tooQuiet
+        } else if total.checked == 0 && total.lines >= noRowsLines {
+            // Lots of logging and not one assistant row: the row marker itself changed, so nothing else could catch it.
+            out.verdict = .noRows
+        } else if out.problemCount >= minProblems, Double(out.problemCount) >= problemShare * Double(max(1, total.checked)) {
+            out.verdict = .problems
+        } else {
+            out.verdict = .ok
+        }
+        return out
     }
 
     /// Global de-duplication by message id across files: keep the copy with the most output,
@@ -150,6 +261,7 @@ final class ClaudeUsageScanner {
             } else { byId[c.id] = c }
         }
         var out = new
+        if var h = old.health, let n = new.health { h.add(n); out.health = h }
         out.calls = Array(byId.values)
         out.titles = old.titles.merging(new.titles) { _, b in b }
         out.limitHits = old.limitHits + new.limitHits
@@ -158,7 +270,8 @@ final class ClaudeUsageScanner {
     }
 
     static func parse(_ url: URL, mtime: Date, size: Int, from start: Int) -> FileResult {
-        var out = FileResult(mtime: mtime, size: size, calls: [], titles: [:], limitHits: [], apiMillis: [:], offset: start)
+        var out = FileResult(mtime: mtime, size: size, calls: [], titles: [:], limitHits: [], apiMillis: [:], offset: start,
+                             health: FormatHealth())
         guard let all = try? Data(contentsOf: url, options: .mappedIfSafe), all.count > start else { return out }
         // Read up to the size seen on disk, and stop at the last complete line in it;
         // a half-written last line is picked up next time.
@@ -171,12 +284,24 @@ final class ClaudeUsageScanner {
         let mTitle = Data("-title\"".utf8)
         let mCost = Data("\"type\":\"cost-state\"".utf8)
         var bestById: [String: Call] = [:]
+        var health = FormatHealth()
+        func problem(_ p: FormatProblem) { health.problems[p.rawValue, default: 0] += 1 }
         for line in data.split(separator: UInt8(ascii: "\n")) {
+            health.lines += 1
             let isAssistant = line.range(of: mAssistant) != nil
             let isTitle = !isAssistant && line.range(of: mTitle) != nil
             let isCost = !isAssistant && line.range(of: mCost) != nil
-            guard isAssistant || isTitle || isCost,
-                  let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else { continue }
+            guard isAssistant || isTitle || isCost else { continue }
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else {
+                if isAssistant { health.checked += 1; problem(.unreadableRow) }
+                continue
+            }
+            // Only top-level assistant rows are judged; the marker can also sit inside other rows' JSON.
+            let judged = isAssistant && (obj["type"] as? String) == "assistant"
+            if judged {
+                health.checked += 1
+                if let v = obj["version"] as? String { health.version = v }
+            }
             let session = obj["sessionId"] as? String ?? url.deletingPathExtension().lastPathComponent
             if isTitle {
                 if let t = obj["customTitle"] as? String { out.titles[session] = t }
@@ -187,15 +312,31 @@ final class ClaudeUsageScanner {
                 if let ms = obj["totalAPIDuration"] as? Int { out.apiMillis[session] = max(out.apiMillis[session] ?? 0, ms) }
                 continue
             }
-            guard let ts = (obj["timestamp"] as? String).flatMap({ isoFrac.date(from: $0) }) else { continue }
-            if let q = obj["quotaLimits"] as? [String: Any], (q["rateLimitType"] as? String) == "five_hour" {
-                out.limitHits.append(ts)
+            guard let ts = (obj["timestamp"] as? String).flatMap({ isoFrac.date(from: $0) }) else {
+                if judged { problem(.noTimestamp) }
                 continue
             }
+            if let q = obj["quotaLimits"] as? [String: Any] {
+                if judged, !Self.knownLimitTypes.contains(q["rateLimitType"] as? String ?? "") { problem(.unknownLimit) }
+                if (q["rateLimitType"] as? String) == "five_hour" {
+                    out.limitHits.append(ts)
+                    continue
+                }
+            }
             if (obj["isApiErrorMessage"] as? Bool) == true { continue }
-            guard let msg = obj["message"] as? [String: Any], let id = msg["id"] as? String,
-                  let model = msg["model"] as? String, model != "<synthetic>",
-                  let u = msg["usage"] as? [String: Any] else { continue }
+            guard let msg = obj["message"] as? [String: Any] else {
+                if judged { problem(.noMessage) }
+                continue
+            }
+            // Synthetic rows (slash-command echoes) carry no real usage by design.
+            if (msg["model"] as? String) == "<synthetic>" { continue }
+            guard let id = msg["id"] as? String, let model = msg["model"] as? String,
+                  let u = msg["usage"] as? [String: Any] else {
+                if judged { problem(.missingFields) }
+                continue
+            }
+            // Token counts that stopped being plain integers would otherwise read as zero, silently.
+            if judged, !(u["input_tokens"] is Int) || !(u["output_tokens"] is Int) { problem(.usageShape) }
             func i(_ d: [String: Any]?, _ k: String) -> Int { (d?[k] as? Int) ?? 0 }
             let cc = u["cache_creation"] as? [String: Any]
             var cw5 = i(cc, "ephemeral_5m_input_tokens"), cw1h = i(cc, "ephemeral_1h_input_tokens")
@@ -243,6 +384,7 @@ final class ClaudeUsageScanner {
             }
         }
         out.calls = Array(bestById.values)
+        out.health = health
         return out
     }
 }

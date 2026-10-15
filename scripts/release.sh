@@ -14,12 +14,17 @@ xcodegen generate --quiet
 OUT=build/release
 rm -rf "$OUT" build/ReleaseDerived; mkdir -p "$OUT"
 
+# Strip debug symbols from the shipped binaries (Xcode only does this for archives) and write source paths
+# relative to the repo, so the download doesn't carry the build machine's home folder.
+CLEAN=(DEPLOYMENT_POSTPROCESSING=YES STRIP_INSTALLED_PRODUCT=YES STRIP_STYLE=non-global
+       OTHER_SWIFT_FLAGS="-file-prefix-map $PWD=.")
+
 if [[ -n "$IDENTITY" ]]; then
   TEAMID=$(echo "$IDENTITY" | sed 's/.*(\(.*\)).*/\1/')
   xcodebuild -project Reset.xcodeproj -scheme Reset -configuration Release -derivedDataPath build/ReleaseDerived \
-    DEVELOPMENT_TEAM="$TEAMID" CODE_SIGN_IDENTITY="$IDENTITY" OTHER_CODE_SIGN_FLAGS="--timestamp" -quiet build
+    DEVELOPMENT_TEAM="$TEAMID" CODE_SIGN_IDENTITY="$IDENTITY" OTHER_CODE_SIGN_FLAGS="--timestamp" "${CLEAN[@]}" -quiet build
 else
-  xcodebuild -project Reset.xcodeproj -scheme Reset -configuration Release -derivedDataPath build/ReleaseDerived -quiet build
+  xcodebuild -project Reset.xcodeproj -scheme Reset -configuration Release -derivedDataPath build/ReleaseDerived "${CLEAN[@]}" -quiet build
 fi
 
 cp -R build/ReleaseDerived/Build/Products/Release/Reset.app "$OUT/"

@@ -70,6 +70,14 @@
       "webSearches" : 0
     }
   ],
+  "health" : {
+    "checked" : 8,
+    "lines" : 11,
+    "problems" : {
+
+    },
+    "version" : "2.9.0"
+  },
   "limitHits" : [
 
   ],
