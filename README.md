@@ -82,13 +82,15 @@ Reset reads local files only:
 - Codex session logs in `~/.codex/sessions`
 - Antigravity's local language server, while Antigravity is open
 
-It only sends anything off your Mac for two optional features, and only to the place you'd expect:
+It only sends anything off your Mac for these features, and only to the place you'd expect:
 
 - **Live Claude usage** sends Claude Code's sign-in to `api.anthropic.com` to read your usage. Reset never stores, refreshes or rewrites that sign-in.
-- **Phone alerts** send the alert text to the ntfy server you choose.
+- **Phone alerts** send the alert text to the ntfy server you choose. The text is only reset and run-out times, such as "Claude has reset: fresh window ready since 7:40 PM", but anyone who knows your topic name can read it, so pick a long, random topic.
 - **Update checks** ask `api.github.com` once a day whether a newer release exists. Turn this off in Settings → About.
 
 No analytics, no accounts, no servers of its own.
+
+**About the MCP server:** when Claude calls one of Reset's MCP tools, the result goes into your Claude Code conversation like any other tool result, so Anthropic sees it: your window usage %, reset time, API-value cost, and the task name of any budget you set. Don't put anything in a budget's task name you wouldn't type in a prompt. The terminal status line is different: it's only shown in your terminal and isn't sent to the model.
 
 ## How the numbers work
 
