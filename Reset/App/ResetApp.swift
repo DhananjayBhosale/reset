@@ -40,11 +40,25 @@ struct MenuBarLabel: View {
         label
             .task {
                 // `open -a Reset --args -openDashboard YES`, and the first launch after install, show the dashboard.
+                // `-openSettings YES` opens Settings, for checking it (with `-simulateLogFormat`, the format warning);
+                // `-renderSettings /path.png` also saves a picture of it, taken by Reset itself.
                 let d = UserDefaults.standard
                 if Demo.isOn { return }
                 if !d.bool(forKey: "onboarded") || d.bool(forKey: "openWelcome") {
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "welcome")
+                } else if d.bool(forKey: "openSettings") || d.string(forKey: "renderSettings") != nil {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: "settings")
+                    if let path = d.string(forKey: "renderSettings") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                            // A window's own view can be drawn into an image without Screen Recording permission.
+                            guard let v = NSApp.windows.first(where: { $0.title == "Reset Settings" })?.contentView,
+                                  let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+                            v.cacheDisplay(in: v.bounds, to: rep)
+                            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+                        }
+                    }
                 } else if d.bool(forKey: "openDashboard") || !d.bool(forKey: "dashboardSeen") {
                     d.set(true, forKey: "dashboardSeen")
                     NSApp.activate(ignoringOtherApps: true)

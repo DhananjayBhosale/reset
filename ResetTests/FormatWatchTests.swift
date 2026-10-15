@@ -147,6 +147,20 @@ final class FormatWatchTests: XCTestCase {
         XCTAssertTrue(r.summary.contains("Claude Code 3.0.0"))
     }
 
+    func testSimulatedWarningsMatchTheRealOnes() {
+        XCTAssertNil(UsageStore.simulatedFormat(nil))
+        XCTAssertNil(UsageStore.simulatedFormat("something else"))
+        XCTAssertEqual(UsageStore.simulatedFormat("problems")?.verdict, .problems)
+        XCTAssertEqual(UsageStore.simulatedFormat("no_rows")?.verdict, .noRows)
+        // The made-up numbers must also pass the real thresholds, or the preview would show a state the app can't reach.
+        for kind in ["problems", "no_rows"] {
+            let r = UsageStore.simulatedFormat(kind)!
+            let file = ClaudeUsageScanner.FileResult(mtime: now, size: 0, calls: [], titles: [:], limitHits: [], apiMillis: [:], offset: 0,
+                                                     health: .init(lines: r.lines, checked: r.checked, problems: r.problems, version: r.version))
+            XCTAssertEqual(verdict([file]).verdict, r.verdict, kind)
+        }
+    }
+
     func testFilesWithoutHealthAreLeftOut() {
         var legacy = file(lines: 0, checked: 0)
         legacy.health = nil

@@ -62,16 +62,12 @@ final class Store {
     private var rescanQueued = false
     private let scanQueue = DispatchQueue(label: "reset.scan", qos: .utility)
 
-    /// Auto-start bookkeeping. A kick is only due after Reset itself watched a window run out while
-    /// auto-start was on, so switching the toggle on never fires a command straight away, and a source
-    /// that stays READY after a kick does not trigger another one.
-    private var lastSeenReset: [String: Date] = (UserDefaults.standard.dictionary(forKey: "lastSeenReset") as? [String: Date]) ?? [:] {
-        didSet { UserDefaults.standard.set(lastSeenReset, forKey: "lastSeenReset") }
+    /// Auto-start bookkeeping (see AutoStartState), saved on every change so a restart picks up where it left off.
+    private var auto = AutoStartState.load(from: AutoStartState.url) {
+        didSet { if auto != oldValue, !Demo.isOn { auto.save(to: autoURL) } }
     }
-    private var kickDue: [String: (reset: Date, attempts: Int)] = [:]
-    /// A kick stopped because Claude Code was signed out, kept so signing in can run it straight away.
-    private var pausedKick: [String: Date] = [:]
-    private var armedAt: [String: Date] = [:]
+    /// Where the state is saved; tests point this at a temporary file so they never touch the real one.
+    var autoURL = AutoStartState.url
 
     init() {
         let d = UserDefaults.standard
@@ -161,7 +157,7 @@ final class Store {
         update(&p)
         prefs[id] = p
         mascots.sync()
-        if p.autoStart && !wasAuto { armedAt[id] = Date(); kickDue[id] = nil }
+        if p.autoStart && !wasAuto { auto.armedAt[id] = Date(); auto.kickDue[id] = nil }
         syncAlerts()
     }
 
@@ -280,36 +276,26 @@ final class Store {
     /// Remembers each provider's reset time while a window runs, and marks a kick as due once that time
     /// passes with auto-start on. A new window (from you or from a kick) clears it.
     private func trackResets() {
-        let t = Date()
-        for s in statuses {
-            if let r = s.resetsAt {
-                lastSeenReset[s.id] = r
-                kickDue[s.id] = nil
-                pausedKick[s.id] = nil
-            } else if s.state == .ready, let r = lastSeenReset[s.id], r <= t {
-                lastSeenReset[s.id] = nil
-                let p = prefs(for: s.id)
-                if s.canAutoStart, p.enabled, p.autoStart, r > (armedAt[s.id] ?? .distantPast) {
-                    kickDue[s.id] = (r, 0)
-                }
-            }
+        auto.track(statuses, now: Date()) { s in
+            let p = prefs(for: s.id)
+            return s.canAutoStart && p.enabled && p.autoStart
         }
     }
 
     private func runAutoStarts() {
         let t = Date()
-        for (id, due) in kickDue {
+        for (id, due) in auto.kickDue {
             guard let s = statuses.first(where: { $0.id == id }), prefs(for: id).autoStart,
-                  let cmd = commands[id], !cmd.isEmpty else { kickDue[id] = nil; continue }
+                  let cmd = commands[id], !cmd.isEmpty else { auto.kickDue[id] = nil; continue }
             if let b = s.blockedUntil, b > t {
                 note("\(s.name): \(s.secondary?.label ?? "longer") limit still exhausted, not auto-starting")
-                kickDue[id] = nil
+                auto.kickDue[id] = nil
                 continue
             }
             // Two minutes of slack past the reset, so a slightly early estimate does not burn a kick.
             guard s.state == .ready, t >= due.reset.addingTimeInterval(120) else { continue }
             guard due.attempts < 4 else {
-                kickDue[id] = nil
+                auto.kickDue[id] = nil
                 note("\(s.name): auto-start gave up after 4 tries")
                 let last = kickLog.last { $0.id == id }?.summary ?? "it kept failing"
                 warnAutoStart(id, title: "Auto-start couldn't start \(s.name)",
@@ -321,15 +307,15 @@ final class Store {
                 self.recordKick(id, outcome)
                 switch outcome {
                 case .started:
-                    self.kickDue[id] = nil
+                    self.auto.kickDue[id] = nil
                 case .signedOut:
                     // Retrying signed out only burns attempts; wait for a sign-in instead.
-                    self.kickDue[id] = nil
-                    self.pausedKick[id] = due.reset
+                    self.auto.kickDue[id] = nil
+                    self.auto.pausedKick[id] = due.reset
                     self.warnAutoStart(id, title: "Auto-start couldn't start \(s.name)",
                                        body: "Claude Code is signed out. Open Reset and press Sign in; the window starts right after.")
                 default:
-                    if var d = self.kickDue[id] { d.attempts += 1; self.kickDue[id] = d }
+                    if var d = self.auto.kickDue[id] { d.attempts += 1; self.auto.kickDue[id] = d }
                 }
                 self.refresh()
             }
@@ -391,8 +377,8 @@ final class Store {
         out["live"] = ["enabled": liveClaudeEnabled, "state": "\(liveClaude.state)", "needsSignIn": liveClaude.needsSignIn]
         out["forecast"] = d(forecast.runsOutAt)
         out["autoStart"] = ["claude": prefs(for: "claude").autoStart, "command": commands["claude"] ?? "",
-                            "kickDue": kickDue.mapValues { "\(iso.string(from: $0.reset)) tries \($0.attempts)" },
-                            "watchingReset": lastSeenReset.mapValues { iso.string(from: $0) }]
+                            "kickDue": auto.kickDue.mapValues { "\(iso.string(from: $0.reset)) tries \($0.attempts)" },
+                            "watchingReset": auto.lastSeenReset.mapValues { iso.string(from: $0) }]
         out["phone"] = ["enabled": phoneEnabled, "topicSet": !ntfyTopic.isEmpty, "server": ntfyServer, "queued": alerts.queuedSummary]
         out["keepAwake"] = ["mode": keepAwake.mode.rawValue, "holding": keepAwake.isHolding, "onPower": keepAwake.onPower]
         out["mascots"] = ["enabled": mascots.enabled, "panels": mascots.panelCount, "placement": mascots.placement.rawValue]
@@ -485,12 +471,12 @@ final class Store {
 
     /// After a sign-in: clear the warning and, if the window is still waiting, run the paused kick now.
     private func resumeAfterSignIn() {
-        guard Store.needsSignIn(kickLog, id: "claude") || pausedKick["claude"] != nil else { return }
+        guard Store.needsSignIn(kickLog, id: "claude") || auto.pausedKick["claude"] != nil else { return }
         appendKickRecord(KickRecord(id: "claude", time: Date(), kind: KickRecord.signedInKind, summary: "Claude Code signed in again"))
-        if let r = pausedKick.removeValue(forKey: "claude"),
+        if let r = auto.pausedKick.removeValue(forKey: "claude"),
            statuses.first(where: { $0.id == "claude" })?.state == .ready, prefs(for: "claude").autoStart {
             kicker.clearBackoff("claude")
-            kickDue["claude"] = (r, 0)
+            auto.kickDue["claude"] = .init(reset: r, attempts: 0)
         }
     }
 

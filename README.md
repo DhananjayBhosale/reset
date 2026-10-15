@@ -139,6 +139,14 @@ open -a Reset --args -demo YES
 
 Nothing is read, written, alerted or auto-started while demo mode is on.
 
+To see the log-format warning without breaking a real transcript, quit Reset and open Settings with a made-up problem:
+
+```bash
+open -a Reset --args -openSettings YES -simulateLogFormat problems
+```
+
+Use `no_rows` instead of `problems` for the "no usage found" variant. `-renderSettings /path/to/settings.png` saves a picture of the window instead.
+
 ## Trademarks
 
 Reset is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI or Google. Claude, Codex, Gemini and Antigravity are trademarks of their owners. The mascots are unofficial fan art based on those products' logos; you can turn them off in Settings. If you represent one of these companies and want the fan art changed or removed, please open an issue.

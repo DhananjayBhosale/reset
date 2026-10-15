@@ -60,6 +60,23 @@ final class UsageStore {
     private(set) var apiMillis: [String: Int] = [:]
     /// Whether Claude Code's recent logs still read cleanly; Settings warns when they don't.
     private(set) var format = ClaudeUsageScanner.FormatReport()
+
+    /// Test hook: `-simulateLogFormat problems` or `-simulateLogFormat no_rows` shows the log-format warning
+    /// with made-up numbers, so it can be seen without breaking a real transcript.
+    static var simulatedFormat: ClaudeUsageScanner.FormatReport? {
+        simulatedFormat(UserDefaults.standard.string(forKey: "simulateLogFormat"))
+    }
+
+    static func simulatedFormat(_ kind: String?) -> ClaudeUsageScanner.FormatReport? {
+        switch kind {
+        case "problems":
+            return .init(verdict: .problems, lines: 5200, checked: 1310, problems: ["no_timestamp": 1290, "usage_shape": 20], version: "3.0.0")
+        case "no_rows":
+            return .init(verdict: .noRows, lines: 4800, checked: 0, problems: [:], version: "3.0.0")
+        default:
+            return nil
+        }
+    }
     private(set) var loading = false
     /// Files parsed so far in the current scan, for the first-launch progress message.
     private(set) var filesRead = 0
@@ -124,7 +141,7 @@ final class UsageStore {
                 self.titles = r.titles
                 self.limitHits = r.limitHits
                 self.apiMillis = r.apiMillis
-                self.format = r.format
+                self.format = Self.simulatedFormat ?? r.format
                 self.loading = false
                 self.lastScan = Date()
                 // Test hook: `--args -renderShareCard /path/card.png` writes the current card once.
