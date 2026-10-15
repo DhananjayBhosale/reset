@@ -19,7 +19,7 @@ private func card(_ e: Entry) -> CardData? {
     guard let p = e.snap?.claude else { return nil }
     return CardData(id: p.id, name: p.name, color: amber, windowStart: p.resetsAt?.addingTimeInterval(-5 * 3600),
                     resetsAt: p.resetsAt, ready: p.ready, blockedUntil: p.blockedUntil, used: p.used,
-                    mascot: W.mascot(p.id, p, at: e.date))
+                    mascot: W.mascot(p.id, p, at: e.date), estimate: p.estimate)
 }
 private func t(_ d: Date?) -> String { d?.formatted(date: .omitted, time: .shortened) ?? "--" }
 private func cap(_ s: String) -> some View { Text(s).font(.system(size: 11, weight: .semibold)).tracking(0.6).foregroundStyle(label) }
@@ -46,7 +46,8 @@ struct GameBoy: View {
                 HStack {
                     Text("CLAUDE").font(.system(size: 8, weight: .heavy, design: .monospaced))
                     Spacer()
-                    Text(d.map { "\(Int((($0.left(at: e.date) ?? 1) * 100).rounded()))%" } ?? "--").font(.system(size: 8, weight: .heavy, design: .monospaced))
+                    Text(d.map { ($0.usageKnown || $0.isReady(at: e.date) ? "" : "~") + "\(Int((($0.left(at: e.date) ?? 1) * 100).rounded()))%" } ?? "--")
+                        .font(.system(size: 8, weight: .heavy, design: .monospaced))
                 }
                 Group {
                     if let d, !d.isReady(at: e.date), let tt = d.target {
@@ -170,7 +171,8 @@ struct ETA: View {
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
                     Text("WINDOW").font(.system(size: 11, weight: .bold)).foregroundStyle(Color(red: 0.3, green: 0.6, blue: 1))
-                    Text("\(Int((left * 100).rounded()))% left").font(.system(size: 11)).foregroundStyle(label)
+                    Text((d?.leftPhrase(at: e.date) ?? "\(Int((left * 100).rounded()))% left") + (d?.estimate != nil ? " · est." : ""))
+                        .font(.system(size: 11)).foregroundStyle(label)
                 }
                 // The route: green for time with plenty left, through yellow and red as the limit nears.
                 GeometryReader { g in

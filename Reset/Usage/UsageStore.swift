@@ -115,10 +115,11 @@ final class UsageStore {
                     }
                 }
             }
-            // Test hook: `-renderDashboard /path.png` writes the whole dashboard once.
+            // Test hook: `-renderDashboard /path.png` writes the whole dashboard once (`-renderWidth 1120` for the narrowest window).
             if let path = UserDefaults.standard.string(forKey: "renderDashboard") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    let v = DashboardView(store: Store.shared, usage: self, flat: true).frame(width: 1240)
+                    let width = UserDefaults.standard.double(forKey: "renderWidth")
+                    let v = DashboardView(store: Store.shared, usage: self, flat: true).frame(width: width > 0 ? width : 1240)
                     let r = ImageRenderer(content: v); r.scale = 2
                     if let img = r.nsImage, let t = img.tiffRepresentation,
                        let png = NSBitmapImageRep(data: t)?.representation(using: .png, properties: [:]) {

@@ -1,16 +1,33 @@
 import SwiftUI
 
+/// Settings in four tabs, so the everyday choices aren't buried among technical ones: General (live usage,
+/// tools, alerts), Automation (auto-start, stay awake), Appearance (look, mascots), and Advanced (commands,
+/// custom tools, Claude Code integration, diagnostics). A beginner never needs Advanced.
 struct SettingsView: View {
     @Bindable var store: Store
     @State private var newName = ""
     @State private var newHours = 5.0
     @State private var topicDraft = ""
+    /// Remembered between openings; `-settingsTab advanced` on the command line opens a given tab (for renders).
+    @AppStorage("settingsTab") private var tab = "general"
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        @Bindable var m = store.mascots
+        TabView(selection: $tab) {
+            general.tabItem { Label("General", systemImage: "gearshape") }.tag("general")
+            automation.tabItem { Label("Automation", systemImage: "bolt") }.tag("automation")
+            appearance.tabItem { Label("Appearance", systemImage: "paintpalette") }.tag("appearance")
+            advanced.tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }.tag("advanced")
+        }
+        .frame(width: 540, height: 680)
+        .onAppear { topicDraft = store.ntfyTopic }
+    }
+
+    // MARK: General
+
+    private var general: some View {
         Form {
-            // Only shown when something is wrong; a healthy check is one quiet line under About.
+            // Only shown when something is wrong; a healthy check is one quiet line under Advanced.
             if [.problems, .noRows].contains(store.usage.format.verdict) {
                 Section {
                     Label {
@@ -31,43 +48,152 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Providers") {
-                ForEach(builtIns, id: \.0) { id, name in
-                    providerRow(id: id, name: name)
-                }
-            }
-
+            // First, because every Claude number is a guess without it.
             Section {
-                ForEach(store.custom) { c in
-                    HStack {
-                        Text(c.name)
-                        Text("\(c.windowHours, specifier: "%g")h window").foregroundStyle(.secondary)
-                        Spacer()
-                        Toggle("Alert", isOn: binding("custom-" + c.id, \.alert)).toggleStyle(.checkbox)
-                        Button(role: .destructive) { store.custom.removeAll { $0.id == c.id } } label: {
-                            Image(systemName: "minus.circle")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                }
-                HStack {
-                    TextField("Name, e.g. ChatGPT", text: $newName)
-                    Stepper("\(newHours, specifier: "%g")h", value: $newHours, in: 0.5...168, step: 0.5)
-                        .frame(width: 110)
-                    Button("Add") {
-                        store.custom.append(CustomProvider(name: newName.trimmingCharacters(in: .whitespaces),
-                                                           windowHours: newHours))
-                        newName = ""
-                    }
-                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                Toggle("Live usage from your Claude account", isOn: $store.liveClaudeEnabled)
+                if store.liveClaudeEnabled {
+                    Text(liveText).font(.caption).foregroundStyle(liveIsProblem ? Color.orange : Color.secondary)
                 }
             } header: {
-                Text("Other tools")
+                Text("Claude accuracy")
             } footer: {
-                Text("For tools Reset cannot read on its own. Press Started now in the menu when you begin, and Reset counts down the window.")
+                Text("Turn this on for exact usage and reset times, every 3 minutes. Without it, Reset estimates from your Claude Code activity and labels its numbers \"estimated\". It reads Claude Code's sign-in from your Keychain (macOS may ask once) and sends it only to api.anthropic.com. Usage numbers only, never chats.")
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                ForEach(builtIns, id: \.0) { id, name in toolRow(id: id, name: name) }
+            } header: {
+                Text("Your tools")
+            } footer: {
+                Text("Switch on the tools you use. Alert: a notification when its window resets.").foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker("Heads-up before reset", selection: $store.leadMinutes) {
+                    Text("Off").tag(0)
+                    ForEach([5, 10, 15, 30], id: \.self) { Text("\($0) min").tag($0) }
+                }
+            } header: {
+                Text("Mac alerts")
+            }
+
+            Section {
+                Toggle("Send reset alerts to my phone", isOn: $store.phoneEnabled)
+                HStack {
+                    TextField("Topic", text: $topicDraft, prompt: Text("a long random name only you know"))
+                        .onSubmit { store.ntfyTopic = topicDraft }
+                    Button("Save") { store.ntfyTopic = topicDraft }
+                        .disabled(topicDraft == store.ntfyTopic || Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) == nil)
+                }
+                HStack {
+                    Button("Send test") { store.sendTestPush() }.disabled(store.ntfyTopic.isEmpty)
+                    Spacer()
+                    if Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) == nil && !topicDraft.isEmpty {
+                        Text("Letters, numbers, - and _ only").font(.caption).foregroundStyle(.red)
+                    }
+                }
+            } header: {
+                Text("Phone alerts")
+            } footer: {
+                Text("Install the free ntfy app on your phone and subscribe to the same topic. Alerts arrive even while this Mac is asleep. Anyone who knows the topic name can read it, so pick something unguessable. To break through Do Not Disturb, allow high-priority alerts for it in the ntfy app. A different ntfy server is under Advanced.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("General") {
+                Toggle("Open at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.launchAtLogin = $0 }))
+                Toggle("Check for updates automatically", isOn: Binding(get: { store.updater.automatic }, set: { store.updater.automatic = $0 }))
+                HStack {
+                    Text(updateText).foregroundStyle(store.updater.available == nil ? Color.secondary : Color.green)
+                    Spacer()
+                    if let u = store.updater.available {
+                        Button("Download \(u.version)") { NSWorkspace.shared.open(u.url) }
+                    } else {
+                        Button(store.updater.checking ? "Checking…" : "Check now") { store.updater.check() }.disabled(store.updater.checking)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private let builtIns = [("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini CLI"), ("antigravity", "Antigravity")]
+
+    private func toolRow(id: String, name: String) -> some View {
+        let status = store.statuses.first { $0.id == id }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Toggle(name, isOn: binding(id, \.enabled))
+                Spacer()
+                Toggle("Alert", isOn: binding(id, \.alert)).toggleStyle(.checkbox)
+            }
+            if let status {
+                Text(store.estimateNote(for: status).map { "\(status.source) · \($0)" } ?? status.source)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: Automation
+
+    private var automation: some View {
+        Form {
+            Section {
+                ForEach(builtIns.filter { id, _ in canAutoStart(id) }, id: \.0) { id, name in autoStartRow(id: id, name: name) }
+            } header: {
+                Text("Auto-start")
+            } footer: {
+                Text("When a window Reset was watching runs out, it sends one short message two minutes later so the next window starts right away, even before you're back. Turning this on doesn't run it now. Skipped while a weekly limit is exhausted. Uses a little of your quota each time. The command it runs is under Advanced.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker("Keep this Mac awake", selection: Binding(get: { store.keepAwake.mode }, set: { store.keepAwake.mode = $0 })) {
+                    ForEach(KeepAwake.Mode.allCases) { Text($0.label).tag($0) }
+                }
+                if store.keepAwake.mode != .off {
+                    Text(store.keepAwake.isHolding ? "Keeping the Mac awake now." : "Not holding right now: the Mac is on battery.")
+                        .font(.caption).foregroundStyle(store.keepAwake.isHolding ? Color.green : Color.secondary)
+                }
+            } header: {
+                Text("Stay awake")
+            } footer: {
+                Text("Auto-start and on-time alerts need the Mac awake. This stops idle sleep only: the display still turns off as usual. Closing the lid still sleeps the Mac unless it's plugged in with an external display. Each auto-start also keeps the Mac awake for the few seconds it runs, on battery too. Phone alerts arrive either way.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func canAutoStart(_ id: String) -> Bool {
+        store.statuses.first { $0.id == id }?.canAutoStart ?? (id != "gemini")
+    }
+
+    private func autoStartRow(id: String, name: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(name, isOn: binding(id, \.autoStart))
+                .disabled(!store.prefs(for: id).enabled)
+            if !store.prefs(for: id).enabled {
+                Text("Switch \(name) on under General first.").font(.caption).foregroundStyle(.secondary)
+            } else if let last = store.kickLog.last(where: { $0.id == id }) {
+                HStack {
+                    Text("Last run \(Fmt.when(last.time)): \(last.summary)")
+                        .font(.caption).foregroundStyle(last.ok ? Color.secondary : Color.orange)
+                    if id == "claude", store.autoStartNeedsSignIn {
+                        Spacer()
+                        Button(store.signingIn ? "Waiting for browser…" : "Sign in") { store.fixClaudeSignIn() }
+                            .controlSize(.small).disabled(store.signingIn)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Appearance
+
+    private var appearance: some View {
+        @Bindable var m = store.mascots
+        return Form {
             Section {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 14) {
                     ForEach(Look.allCases) { look in
@@ -111,74 +237,79 @@ struct SettingsView: View {
             } header: {
                 Text("Mascots")
             } footer: {
-                Text("Each mascot's mood and health bar follow how much of its window is left. Drag one to move it, right-click to change where they live. Mascots only show for providers switched on above.\n\nThe mascots are unofficial fan art based on the Claude, OpenAI, Gemini and Antigravity logos. Those names and logos belong to Anthropic, OpenAI and Google, who have nothing to do with Reset.")
+                Text("Each mascot's mood and health bar follow how much of its window is left. Drag one to move it, right-click to change where they live. Mascots only show for tools switched on under General.\n\nThe mascots are unofficial fan art based on the Claude, OpenAI, Gemini and Antigravity logos. Those names and logos belong to Anthropic, OpenAI and Google, who have nothing to do with Reset.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: Advanced
+
+    private var advanced: some View {
+        Form {
+            Section {
+                ForEach(builtIns.filter { id, _ in canAutoStart(id) }, id: \.0) { id, name in
+                    TextField(name, text: Binding(get: { store.commands[id] ?? "" }, set: { store.commands[id] = $0 }))
+                        .font(.system(size: 11, design: .monospaced))
+                }
+            } header: {
+                Text("Auto-start commands")
+            } footer: {
+                Text("Run in a login shell when auto-start or Start now fires. The defaults send one word to the cheapest model without loading tools or MCP servers, so runs are quick.")
                     .foregroundStyle(.secondary)
             }
 
             Section {
-                Picker("Heads-up before reset", selection: $store.leadMinutes) {
-                    Text("Off").tag(0)
-                    ForEach([5, 10, 15, 30], id: \.self) { Text("\($0) min").tag($0) }
-                }
-            } header: {
-                Text("Mac alerts")
-            }
-
-            Section {
-                Toggle("Send reset alerts to my phone", isOn: $store.phoneEnabled)
                 TextField("ntfy server", text: $store.ntfyServer)
-                HStack {
-                    TextField("Topic", text: $topicDraft, prompt: Text("a long random name only you know"))
-                        .onSubmit { store.ntfyTopic = topicDraft }
-                    Button("Save") { store.ntfyTopic = topicDraft }
-                        .disabled(topicDraft == store.ntfyTopic || Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) == nil)
-                }
-                HStack {
-                    Button("Send test") { store.sendTestPush() }.disabled(store.ntfyTopic.isEmpty)
-                    Spacer()
-                    if Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) == nil && !topicDraft.isEmpty {
-                        Text("Letters, numbers, - and _ only").font(.caption).foregroundStyle(.red)
+            } header: {
+                Text("Phone alert server")
+            } footer: {
+                Text("ntfy.sh unless you run your own.").foregroundStyle(.secondary)
+            }
+
+            Section {
+                ForEach(store.custom) { c in
+                    HStack {
+                        Text(c.name)
+                        Text("\(c.windowHours, specifier: "%g")h window").foregroundStyle(.secondary)
+                        Spacer()
+                        Toggle("Alert", isOn: binding("custom-" + c.id, \.alert)).toggleStyle(.checkbox)
+                        Button(role: .destructive) { store.custom.removeAll { $0.id == c.id } } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
                     }
                 }
+                HStack {
+                    TextField("Name, e.g. ChatGPT", text: $newName)
+                    Stepper("\(newHours, specifier: "%g")h", value: $newHours, in: 0.5...168, step: 0.5)
+                        .frame(width: 110)
+                    Button("Add") {
+                        store.custom.append(CustomProvider(name: newName.trimmingCharacters(in: .whitespaces), windowHours: newHours))
+                        newName = ""
+                    }
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
             } header: {
-                Text("Phone alerts")
+                Text("Other tools")
             } footer: {
-                Text("Install the free ntfy app on your phone and subscribe to the same topic. Each alert is queued on the ntfy server with its delivery time, so it still arrives when this Mac is asleep, and it is replaced or withdrawn if the reset time changes. Alerts are sent at high priority; to break through Do Not Disturb, allow it for that priority in the ntfy app. Anyone who knows the topic name can read it, so pick something unguessable.")
+                Text("For tools Reset cannot read on its own. Press Started now in the menu when you begin, and Reset counts down the window.")
                     .foregroundStyle(.secondary)
             }
 
             Section {
-                Picker("Keep this Mac awake", selection: Binding(get: { store.keepAwake.mode }, set: { store.keepAwake.mode = $0 })) {
-                    ForEach(KeepAwake.Mode.allCases) { Text($0.label).tag($0) }
-                }
-                if store.keepAwake.mode != .off {
-                    Text(store.keepAwake.isHolding ? "Keeping the Mac awake now." : "Not holding right now: the Mac is on battery.")
-                        .font(.caption).foregroundStyle(store.keepAwake.isHolding ? Color.green : Color.secondary)
-                }
+                integrationRow("Status line", "Add to ~/.claude/settings.json",
+                               #""statusLine": {"type": "command", "command": "cat \"$HOME/Library/Application Support/Reset/statusline.txt\""}"#)
+                integrationRow("MCP server", "Lets Claude check your window and set pacing budgets",
+                               "claude mcp add --scope user reset -- /Applications/Reset.app/Contents/MacOS/reset-mcp")
             } header: {
-                Text("Stay awake")
-            } footer: {
-                Text("Auto-start and on-time alerts need the Mac awake. This stops idle sleep only: the display still turns off as usual. Closing the lid still sleeps the Mac unless it's plugged in with an external display. Phone alerts arrive either way.")
-                    .foregroundStyle(.secondary)
+                Text("Claude Code integration")
             }
 
-            Section("General") {
-                Toggle("Open at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.launchAtLogin = $0 }))
-            }
-
-            Section("About") {
-                Toggle("Check for updates automatically", isOn: Binding(get: { store.updater.automatic }, set: { store.updater.automatic = $0 }))
+            Section {
                 HStack {
-                    Text(updateText).foregroundStyle(store.updater.available == nil ? Color.secondary : Color.green)
-                    Spacer()
-                    if let u = store.updater.available {
-                        Button("Download \(u.version)") { NSWorkspace.shared.open(u.url) }
-                    } else {
-                        Button(store.updater.checking ? "Checking…" : "Check now") { store.updater.check() }.disabled(store.updater.checking)
-                    }
-                }
-                HStack {
-                    Text("Setup")
+                    Text("Setup guide")
                     Spacer()
                     Button("Run setup again") {
                         NSApp.activate(ignoringOtherApps: true)
@@ -186,67 +317,54 @@ struct SettingsView: View {
                     }
                 }
                 HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Something wrong?")
+                        Text("Opens a GitHub issue with versions and on/off states filled in, never usage numbers, project names or your phone topic. You see it all before sending.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Report a problem…") { if let u = store.problemReportURL() { NSWorkspace.shared.open(u) } }
+                }
+                Text(store.usage.format.summary).font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("Activity") {
+                    if store.log.isEmpty { Text("Nothing yet").foregroundStyle(.secondary) }
+                    ForEach(Array(store.log.enumerated()), id: \.offset) { Text($0.element).font(.system(size: 11, design: .monospaced)) }
+                }
+            } header: {
+                Text("Diagnostics")
+            }
+
+            Section("About") {
+                HStack {
                     Text("Reset \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                     Spacer()
                     Link("Source on GitHub", destination: URL(string: ResetInfo.repoURL)!)
                 }
-                Text(store.usage.format.summary).font(.caption).foregroundStyle(.secondary)
-                Text("Free and open source under the MIT license. Everything Reset reads stays on this Mac; the only things it sends out are the optional live Claude usage check (to Anthropic) and phone alerts (to the ntfy server you choose). Not affiliated with Anthropic, OpenAI or Google.")
+                Text("Free and open source under the MIT license. Everything Reset reads stays on this Mac; it only sends something out for the optional live Claude usage check (to Anthropic), phone alerts (to your ntfy server) and update checks (to GitHub). Not affiliated with Anthropic, OpenAI or Google.")
                     .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section("Activity") {
-                if store.log.isEmpty { Text("Nothing yet").foregroundStyle(.secondary) }
-                ForEach(Array(store.log.enumerated()), id: \.offset) { Text($0.element).font(.system(size: 11, design: .monospaced)) }
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 720)
-        .onAppear { topicDraft = store.ntfyTopic }
     }
 
-    private let builtIns = [("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini CLI"), ("antigravity", "Antigravity")]
-
-    @ViewBuilder private func providerRow(id: String, name: String) -> some View {
-        let status = store.statuses.first { $0.id == id }
-        VStack(alignment: .leading, spacing: 6) {
+    /// A copyable snippet for wiring Reset into Claude Code.
+    private func integrationRow(_ title: String, _ detail: String, _ snippet: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Toggle(name, isOn: binding(id, \.enabled))
+                Text(title)
                 Spacer()
-                Toggle("Alert", isOn: binding(id, \.alert)).toggleStyle(.checkbox)
-                if status?.canAutoStart ?? (id != "gemini") {
-                    Toggle("Auto-start", isOn: binding(id, \.autoStart)).toggleStyle(.checkbox)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(snippet, forType: .string)
                 }
+                .controlSize(.small)
             }
-            if let status { Text(status.source).font(.caption).foregroundStyle(.secondary) }
-            if id == "claude" {
-                Toggle("Live usage from your Claude account", isOn: $store.liveClaudeEnabled)
-                Text("Exact % and reset time, every 3 minutes. Reads Claude Code's sign-in from your Keychain (macOS may ask once) and sends it only to api.anthropic.com. Usage numbers only, never chats.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if store.liveClaudeEnabled {
-                    Text(liveText).font(.caption).foregroundStyle(liveIsProblem ? Color.orange : Color.secondary)
-                }
-            }
-            if store.prefs(for: id).autoStart {
-                TextField("Command", text: Binding(get: { store.commands[id] ?? "" },
-                                                   set: { store.commands[id] = $0 }))
-                    .font(.system(size: 11, design: .monospaced))
-                Text("Runs once, two minutes after a window Reset was watching runs out, while the Mac is awake. Turning this on does not run it now. Skipped while a weekly limit is exhausted. Uses a little of your quota each time.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let last = store.kickLog.last(where: { $0.id == id }) {
-                    HStack {
-                        Text("Last auto-start \(Fmt.when(last.time)): \(last.summary)")
-                            .font(.caption).foregroundStyle(last.ok ? Color.secondary : Color.orange)
-                        if id == "claude", store.autoStartNeedsSignIn {
-                            Spacer()
-                            Button(store.signingIn ? "Waiting for browser…" : "Sign in") { store.fixClaudeSignIn() }
-                                .controlSize(.small).disabled(store.signingIn)
-                        }
-                    }
-                }
-            }
+            Text(detail).font(.caption).foregroundStyle(.secondary)
+            Text(snippet).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(3)
         }
     }
+
+    // MARK: Helpers
 
     private var updateText: String {
         if let u = store.updater.available { return "Reset \(u.version) is available" }

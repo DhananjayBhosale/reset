@@ -61,16 +61,16 @@ Find your team ID in Xcode under Settings → Accounts, or in Keychain Access on
 
 ## Setting it up
 
-The first launch opens a short setup guide that covers all of this. You can run it again from **Settings → About**, or change anything below in **Settings**.
+The first launch opens a short setup guide that covers all of this. You can run it again from **Settings → Advanced**, or change anything below in **Settings**, which has four tabs: **General** (live usage, your tools, alerts), **Automation** (auto-start, stay awake), **Appearance** (look, mascots) and **Advanced** (commands, custom tools, Claude Code integration, diagnostics).
 
 | Feature | How |
 |---|---|
-| Exact Claude usage | Turn on **Live usage from your Claude account**. Reset reads the sign-in that the Claude Code CLI stores in your Keychain and asks Anthropic for your current usage every 3 minutes. If it says the sign-in expired, run `claude auth login` once. |
-| Phone alerts | Install the free ntfy app, subscribe to a long random topic name, and enter the same topic under **Phone alerts**. Anyone who knows the topic can read it, so make it unguessable. |
-| Auto-start | Tick **Auto-start** for Claude. It runs `claude -p "hi" --model haiku` once when a window you were watching runs out, while the Mac is awake. Each run uses a little of your quota. |
+| Exact Claude usage | **Settings → General**: turn on **Live usage from your Claude account**. Reset reads the sign-in that the Claude Code CLI stores in your Keychain and asks Anthropic for your current usage every 3 minutes. If it says the sign-in expired, run `claude auth login` once. |
+| Phone alerts | Install the free ntfy app, subscribe to a long random topic name, and enter the same topic under **Settings → General → Phone alerts**. Anyone who knows the topic can read it, so make it unguessable. |
+| Auto-start | **Settings → Automation**: turn on **Auto-start** for Claude. It runs `claude -p "hi" --model haiku` (the command is under Advanced) once when a window you were watching runs out, while the Mac is awake. Each run uses a little of your quota. |
 | Value multiple | Press **Add your plan price** on the dashboard and enter what you pay per month. |
-| Stay awake | **Settings → Stay awake**: Off, When plugged in, or Always. Blocks idle sleep only; closing the lid still sleeps the Mac unless it's plugged in with an external display. |
-| Status line | Add to `~/.claude/settings.json`: `"statusLine": {"type": "command", "command": "cat \"$HOME/Library/Application Support/Reset/statusline.txt\""}` |
+| Stay awake | **Settings → Automation → Stay awake**: Off, When plugged in, or Always. Blocks idle sleep only; closing the lid still sleeps the Mac unless it's plugged in with an external display. |
+| Status line | **Settings → Advanced** has a Copy button, or add to `~/.claude/settings.json`: `"statusLine": {"type": "command", "command": "cat \"$HOME/Library/Application Support/Reset/statusline.txt\""}` |
 | MCP server | `claude mcp add --scope user reset -- /Applications/Reset.app/Contents/MacOS/reset-mcp`. Tools: `get_claude_usage`, plus `set_budget` (task, max window %, optional downshift model) and `clear_budget`. With a budget set, the advice moves from normal to wrap-up at 80% of the cap to downshift at the cap. The active budget shows under the burn bar on the dashboard, with a Clear button. It's kept in `budget.json` next to `widget.json` and never leaves the Mac. |
 
 ## Privacy
@@ -86,7 +86,7 @@ It only sends anything off your Mac for these features, and only to the place yo
 
 - **Live Claude usage** sends Claude Code's sign-in to `api.anthropic.com` to read your usage. Reset never stores, refreshes or rewrites that sign-in.
 - **Phone alerts** send the alert text to the ntfy server you choose. The text is only reset and run-out times, such as "Claude has reset: fresh window ready since 7:40 PM", but anyone who knows your topic name can read it, so pick a long, random topic.
-- **Update checks** ask `api.github.com` once a day whether a newer release exists. Turn this off in Settings → About.
+- **Update checks** ask `api.github.com` once a day whether a newer release exists. Turn this off in Settings → General.
 
 No analytics, no accounts, no servers of its own.
 
@@ -122,7 +122,7 @@ The fixtures are frozen files, so a failure means **Reset's parsing changed**, n
 - **You changed a parser on purpose:** read the diff the script prints (it compares `Fixtures/golden` with the fresh output in your temporary folder). If every difference is one you intended, run `--update-goldens` and commit the new goldens with the parser change.
 - **You didn't mean to change anything:** treat it as a regression and fix the code, not the golden.
 
-**After a Claude Code update**, Reset watches for you: while scanning, it counts recent transcript rows that look like usage but can't be read (bad JSON, a timestamp it can't parse, a missing message, id, model or token counts, token counts that aren't numbers, an unknown limit kind), and notices when Claude Code writes plenty of log lines with no usage in them at all. If that happens in the last 2 days, Settings shows a warning at the top naming the Claude Code version. Healthy logs show one quiet line under Settings → About. It runs on your Mac and sends nothing. The goldens themselves won't fail, because they don't read your live logs. To capture a new format for them:
+**After a Claude Code update**, Reset watches for you: while scanning, it counts recent transcript rows that look like usage but can't be read (bad JSON, a timestamp it can't parse, a missing message, id, model or token counts, token counts that aren't numbers, an unknown limit kind), and notices when Claude Code writes plenty of log lines with no usage in them at all. If that happens in the last 2 days, Settings shows a warning at the top naming the Claude Code version. Healthy logs show one quiet line under Settings → Advanced → Diagnostics. It runs on your Mac and sends nothing. The goldens themselves won't fail, because they don't read your live logs. To capture a new format for them:
 
 1. Copy a few fresh rows of the changed kind from `~/.claude/projects/…/*.jsonl` (or the other source).
 2. Anonymise them: replace ids, uuids, session ids, request ids, `cwd`, org ids, and all prompt, reply, thinking and signature text. Keep every key and the shape and types of every value; that's what the parsers depend on.
@@ -149,7 +149,7 @@ Use `no_rows` instead of `problems` for the "no usage found" variant. `-renderSe
 
 ## Trademarks
 
-Reset is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI or Google. Claude, Codex, Gemini and Antigravity are trademarks of their owners. The mascots are unofficial fan art based on those products' logos; you can turn them off in Settings. If you represent one of these companies and want the fan art changed or removed, please open an issue.
+Reset is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI or Google. Claude, Codex, Gemini and Antigravity are trademarks of their owners. The mascots are unofficial fan art based on those products' logos; you can turn them off in Settings → Appearance. If you represent one of these companies and want the fan art changed or removed, please open an issue.
 
 ## License
 

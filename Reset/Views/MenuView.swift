@@ -81,7 +81,11 @@ struct MenuView: View {
     private var subline: String {
         guard let h = hero else { return "" }
         if let b = h.blockedUntil, b > store.now { return "Back \(Fmt.when(b, now: store.now))" }
-        if let r = h.resetsAt { return "Resets \(Fmt.when(r, now: store.now))" + (h.isEstimate ? " · estimated" : "") }
+        if let r = h.resetsAt {
+            // With the sign-in banner showing, the reason is already on screen; "estimated" alone is enough here.
+            let note = store.liveNeedsSignIn && h.id == "claude" ? (h.isEstimate ? "estimated" : nil) : store.estimateNote(for: h)
+            return "Resets \(Fmt.when(r, now: store.now))" + (note.map { " · " + $0 } ?? "")
+        }
         if case .unavailable(let why) = h.state { return why }
         return "Send a message to start the clock"
     }

@@ -47,7 +47,20 @@ final class Store {
         let window: TimeInterval = s.id == "gemini" ? 86400 : 5 * 3600
         return CardData(id: s.id, name: s.name, color: Theme.color(for: s.id), windowStart: s.resetsAt?.addingTimeInterval(-window),
                         resetsAt: s.resetsAt, ready: s.state == .ready, blockedUntil: s.blockedUntil, used: s.usedPercent,
-                        mascot: MascotArt.image(s.id, Mood.of(s, justReset: false)).map { Image(nsImage: $0) }, windowLength: window)
+                        mascot: MascotArt.image(s.id, Mood.of(s, justReset: false)).map { Image(nsImage: $0) }, windowLength: window,
+                        estimate: estimateNote(for: s))
+    }
+
+    /// "estimated · live usage off" and the like, or nil when the numbers are solid. Only Claude has a live
+    /// source to fall back from; the others are exact from their own logs or plainly labelled as estimates.
+    func estimateNote(for s: WindowStatus) -> String? {
+        guard s.id == "claude" else { return nil }
+        if case .unavailable = s.state { return nil }
+        // Only a reported problem counts as not working; still loading is "waiting", not "unavailable".
+        var working = true
+        if case .problem = liveClaude.state { working = false }
+        return UsageAccuracy.note(isEstimate: s.isEstimate, usageKnown: s.usedPercent != nil, liveEnabled: liveClaudeEnabled,
+                                  liveWorking: working, needsSignIn: liveClaude.needsSignIn)
     }
 
     let alerts = Alerts()
@@ -391,6 +404,7 @@ final class Store {
         out["autoStartLog"] = kickLog.suffix(5).map { ["id": $0.id, "time": iso.string(from: $0.time), "kind": $0.kind, "summary": $0.summary] }
         out["autoStartNeedsSignIn"] = autoStartNeedsSignIn
         out["activity"] = Array(log.prefix(10))
+        out["problemReport"] = problemReportURL().flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "body" }?.value } ?? NSNull()
         out["logFormat"] = ["verdict": usage.format.verdict.rawValue, "summary": usage.format.summary,
                             "checked": usage.format.checked, "lines": usage.format.lines, "problems": usage.format.problems]
         out["statusLine"] = (try? String(contentsOf: WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("statusline.txt"))) ?? NSNull()
@@ -501,6 +515,33 @@ final class Store {
         }
     }
 
+    /// The pre-filled GitHub issue for Settings → Advanced → Report a problem. Built from on/off states and
+    /// versions only; see ProblemReport for what is and isn't included.
+    func problemReportURL() -> URL? {
+        let claude = statuses.first { $0.id == "claude" }
+        let live: String = {
+            guard liveClaudeEnabled else { return "off" }
+            switch liveClaude.state {
+            case .ok: return "working"
+            case .problem(let why): return "problem: \(why)"
+            case .off, .loading: return "connecting"
+            }
+        }()
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        let facts = ProblemReport.Facts(
+            resetVersion: Updater.current, macOS: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+            macModel: ProblemReport.macModel,
+            toolsOn: statuses.filter { prefs(for: $0.id).enabled && !$0.id.hasPrefix("custom-") }.map(\.name),
+            liveUsage: live,
+            claudeAccuracy: claude.flatMap { estimateNote(for: $0) } ?? (claude == nil ? "Claude off" : "solid"),
+            logFormat: usage.format.verdict.rawValue,
+            lastAutoStart: kickLog.last.map { "\($0.kind) (\($0.id))" } ?? "never",
+            stayAwake: keepAwake.mode.label,
+            phoneAlerts: phoneEnabled,
+            widgetsSigned: ProblemReport.hasTeamSignature)
+        return ProblemReport.url(repo: ResetInfo.repoURL, facts: facts)
+    }
+
     /// Mac notification, plus a phone push when phone alerts are on, for an auto-start that needs you.
     /// One stable id per provider, so a second failure replaces the first.
     private func warnAutoStart(_ id: String, title: String, body: String) {
@@ -538,7 +579,7 @@ final class Store {
             var available = true
             if case .unavailable = s.state { available = false }
             return .init(id: s.id, name: s.name, resetsAt: s.resetsAt, ready: s.state == .ready, available: available,
-                         used: s.usedPercent, blockedUntil: s.blockedUntil)
+                         used: s.usedPercent, blockedUntil: s.blockedUntil, estimate: estimateNote(for: s))
         }
         let windows = usage.windows(days: 5).map { WidgetSnapshot.Window(start: $0.start, end: $0.end, autoStart: $0.autoStart, hitLimit: $0.hitLimit) }
         var snap = WidgetSnapshot(updated: .distantPast, look: look, providers: providers, windows: windows, weekCost: weekCost,

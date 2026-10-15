@@ -30,6 +30,25 @@ struct CardData {
     var used: Double?
     var mascot: Image?
     var windowLength: TimeInterval = 5 * 3600
+    /// Why the numbers are a guess, or nil when they're solid (see UsageAccuracy).
+    var estimate: String? = nil
+
+    /// Usage is known only from a reading; without one, `left` falls back to the clock.
+    var usageKnown: Bool { used != nil }
+
+    /// "42% left" from usage, or "~70% of time left" when only the clock is known, so time is never
+    /// passed off as usage.
+    func leftPhrase(at now: Date) -> String {
+        guard let l = left(at: now) else { return "--" }
+        let pct = Int((l * 100).rounded())
+        if usageKnown || isReady(at: now) || (blockedUntil.map { $0 > now } ?? false) { return "\(pct)% left" }
+        return "~\(pct)% of time left"
+    }
+
+    /// The small word under a big percentage: "left", or "time left" when it's the clock.
+    func leftWord(at now: Date) -> String {
+        usageKnown || isReady(at: now) ? "left" : "time left"
+    }
 
     /// 0...1 left: by usage when known, else by time.
     func left(at now: Date) -> Double? {
@@ -112,8 +131,10 @@ private func clock(_ d: Date?) -> String {
     let f = DateFormatter(); f.dateFormat = "h:mm a"; return f.string(from: d)
 }
 
+/// The bare percentage for big numbers; "~" marks it as time-based when there's no usage reading.
 private func pctLeft(_ d: CardData, _ now: Date) -> String {
-    d.left(at: now).map { "\(Int(($0 * 100).rounded()))%" } ?? "--"
+    guard let l = d.left(at: now) else { return "--" }
+    return (d.usageKnown || d.isReady(at: now) ? "" : "~") + "\(Int((l * 100).rounded()))%"
 }
 
 private extension Color {
@@ -136,7 +157,7 @@ struct GlowLook: View {
                     Spacer()
                     CountdownText(d: d, now: now).font(.system(size: 48, weight: .light).monospacedDigit()).foregroundStyle(.white)
                         .lineLimit(1).minimumScaleFactor(0.5)
-                    Text(d.isReady(at: now) ? "fresh window waiting" : "resets \(clock(d.target)) · \(pctLeft(d, now)) left")
+                    Text(d.isReady(at: now) ? "fresh window waiting" : "resets \(clock(d.target)) · \(d.leftPhrase(at: now))")
                         .font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
                 }
                 Spacer()
@@ -165,7 +186,7 @@ struct PaperLook: View {
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     CountdownText(d: d, now: now, readyText: "Fresh").font(.system(size: 38, weight: .semibold).monospacedDigit()).foregroundStyle(.black)
-                    Text(d.isReady(at: now) ? "" : "left").font(.system(size: 14)).foregroundStyle(.black.opacity(0.45))
+                    Text(d.isReady(at: now) ? "" : d.leftWord(at: now)).font(.system(size: 14)).foregroundStyle(.black.opacity(0.45))
                     Spacer()
                     Text(pctLeft(d, now)).font(.system(size: 14, weight: .medium).monospacedDigit()).foregroundStyle(.black.opacity(0.7))
                 }
@@ -360,7 +381,7 @@ struct SkyLook: View {
                 HStack {
                     Text(left > 0.6 ? "Day" : left > 0.25 ? "Evening" : "Night").font(.system(size: 13, weight: .medium))
                     Spacer()
-                    Text(pctLeft(d, now) + " left").font(.system(size: 12).monospacedDigit())
+                    Text(d.leftPhrase(at: now)).font(.system(size: 12).monospacedDigit())
                 }
                 Text(d.name).font(.system(size: 11)).opacity(0.7)
                 Spacer()
@@ -398,7 +419,7 @@ struct ComplicationLook: View {
                     }
                     VStack(spacing: 0) {
                         Text(pctLeft(d, now)).font(.system(size: 22, weight: .bold).monospacedDigit()).foregroundStyle(.black)
-                        Text("left").font(.system(size: 10)).foregroundStyle(.black.opacity(0.5))
+                        Text(d.leftWord(at: now)).font(.system(size: 10)).foregroundStyle(.black.opacity(0.5))
                     }
                 }
                 .frame(width: 96, height: 96)

@@ -165,9 +165,11 @@ struct ClaudeSmall: View {
         }
     }
     private func subtitle(_ p: WidgetSnapshot.Provider) -> String {
-        if W.isReady(p, at: e.date) { return "fresh window waiting" }
+        if W.isReady(p, at: e.date) { return "fresh window waiting" + (p.estimate != nil ? " · est." : "") }
         var s = p.resetsAt.map { "resets " + $0.formatted(date: .omitted, time: .shortened) } ?? ""
         if let u = p.used { s += " · \(Int((100 - u).rounded()))% left" }
+        // Too small for the reason; "est." is enough to not read as exact, and the menu says why.
+        if p.estimate != nil { s += " · est." }
         return s
     }
 }
@@ -193,7 +195,10 @@ struct WeekLarge: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Claude").font(.system(size: 13, weight: .medium))
-                    Text(p?.resetsAt.map { "resets " + $0.formatted(date: .omitted, time: .shortened) } ?? " ").font(.system(size: 11)).foregroundStyle(W.dim)
+                    // The large widget has room for the whole reason.
+                    Text((p?.resetsAt.map { "resets " + $0.formatted(date: .omitted, time: .shortened) } ?? " ")
+                         + (p?.estimate.map { " · " + $0 } ?? ""))
+                        .font(.system(size: 11)).foregroundStyle(W.dim).lineLimit(1).minimumScaleFactor(0.8)
                 }
                 Spacer()
                 if let p, let img = W.mascot("claude", p, at: e.date) {

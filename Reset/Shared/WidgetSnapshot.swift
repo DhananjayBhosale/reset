@@ -11,6 +11,8 @@ struct WidgetSnapshot: Codable {
         var available: Bool
         var used: Double?
         var blockedUntil: Date?
+        /// Why these numbers are a guess (see UsageAccuracy), or nil when they're solid. Optional for old snapshots.
+        var estimate: String? = nil
     }
     struct Window: Codable {
         var start: Date

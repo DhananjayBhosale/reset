@@ -35,7 +35,7 @@ enum MCPServer {
         case "initialize":
             let requested = params?["protocolVersion"] as? String ?? "2025-06-18"
             return result(["protocolVersion": requested, "capabilities": ["tools": [String: Any]()],
-                           "serverInfo": ["name": "reset", "version": "0.3.6"]])
+                           "serverInfo": ["name": "reset", "version": "0.3.7"]])
         case "tools/list":
             return result(["tools": tools])
         case "tools/call":
@@ -154,6 +154,9 @@ enum MCPServer {
                 claude["minutes_until_reset"] = Int(r.timeIntervalSince(now) / 60)
             }
             if let b = c.blockedUntil, b > now { claude["weekly_limit_until"] = iso.string(from: b) }
+            // An agent pacing itself should know when these numbers are a guess, and why.
+            claude["estimated"] = c.estimate != nil
+            if let e = c.estimate { claude["estimate_note"] = e }
             if let o = snap.claudeRunsOutAt, o > now {
                 claude["projected_run_out_local"] = local.string(from: o)
                 claude["minutes_until_run_out"] = Int(o.timeIntervalSince(now) / 60)

@@ -11,7 +11,7 @@ private func claudeCard(_ e: Entry) -> CardData? {
     guard let p = e.snap?.claude else { return nil }
     return CardData(id: p.id, name: p.name, color: W.color(p.id), windowStart: p.resetsAt?.addingTimeInterval(-5 * 3600),
                     resetsAt: p.resetsAt, ready: p.ready, blockedUntil: p.blockedUntil, used: p.used,
-                    mascot: W.mascot(p.id, p, at: e.date))
+                    mascot: W.mascot(p.id, p, at: e.date), estimate: p.estimate)
 }
 
 private struct Missing: View {
@@ -51,8 +51,10 @@ struct GaugeSmall: View {
                         }
                     }
                     VStack(spacing: 0) {
-                        Text("\(Int((left * 100).rounded()))%").font(.system(size: 30, weight: .bold).monospacedDigit()).foregroundStyle(.white)
-                        Text("left").font(.system(size: 10)).foregroundStyle(W.dim)
+                        // "~" and "time left" when it's the clock rather than a usage reading; "est." when guessed.
+                        Text((d.usageKnown || d.isReady(at: e.date) ? "" : "~") + "\(Int((left * 100).rounded()))%")
+                            .font(.system(size: 30, weight: .bold).monospacedDigit()).foregroundStyle(.white)
+                        Text(d.leftWord(at: e.date) + (d.estimate != nil ? " · est." : "")).font(.system(size: 10)).foregroundStyle(W.dim)
                         CountdownText(d: d, now: e.date, align: .center).font(.system(size: 13, weight: .semibold).monospacedDigit())
                             .foregroundStyle(Color(red: 1, green: 0.62, blue: 0.26)).padding(.top, 4)
                             .frame(width: 76)

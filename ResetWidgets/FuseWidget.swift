@@ -57,7 +57,7 @@ struct Fuse: View {
         case .unknown: return "Open Reset"
         case .ready: return "Fuse not lit"
         case .blocked(let until): return "Weekly limit until \(time(until))"
-        case .onPace: return m.percentLeft.map { "On pace · \($0)% left" } ?? "On pace"
+        case .onPace: return m.percentLeft.map { "On pace · \($0)% left" } ?? "Window running"
         case .runningOut: return "Runs out \(m.runsOutAt.map(time) ?? "")"
         }
     }
@@ -67,7 +67,9 @@ struct Fuse: View {
         case .unknown: return "No usage yet"
         case .ready: return W.isStarting(e.snap, at: e.date) ? "Starting your window…" : "A fresh window is waiting. Light it now, or with your next message."
         case .blocked: return "A new session window wouldn't help until then."
-        case .onPace: return m.reset.map { "Lasts until the \(time($0)) reset at this pace" } ?? ""
+        case .onPace:
+            let base = m.reset.map { "Lasts until the \(time($0)) reset at this pace" } ?? ""
+            return base + (e.snap?.claude?.estimate.map { " · " + $0 } ?? "")
         case .runningOut:
             guard let out = m.runsOutAt, let reset = m.reset else { return "" }
             let early = duration(reset.timeIntervalSince(out))

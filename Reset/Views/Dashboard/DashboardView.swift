@@ -131,7 +131,11 @@ struct DashboardView: View {
             }
             sideToggle("Phone alerts", on: store.phoneEnabled,
                        help: store.ntfyTopic.isEmpty ? "Set a topic in Settings → Phone alerts first" : "Send reset alerts to your phone through ntfy") { v in
-                if v && store.ntfyTopic.isEmpty { NSApp.activate(ignoringOtherApps: true); openWindow(id: "settings"); return }
+                if v && store.ntfyTopic.isEmpty {
+                    // Phone alerts live on the General tab; open there rather than wherever Settings was left.
+                    UserDefaults.standard.set("general", forKey: "settingsTab")
+                    NSApp.activate(ignoringOtherApps: true); openWindow(id: "settings"); return
+                }
                 store.phoneEnabled = v
             }
             sideToggle("Mascots", on: store.mascots.enabled, help: "Show the desktop mascots") { v in
@@ -201,13 +205,9 @@ struct DashboardView: View {
             let remaining = end.map { max(0, $0.timeIntervalSince(store.now)) } ?? 0
             let elapsed = end != nil ? 1 - remaining / (5 * 3600) : 0
             ZStack(alignment: .topLeading) {
-                WindowArc(progress: elapsed, color: Dash.claude)
-                    .frame(height: 200)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 6)
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .top) {
-                        CardHeader(title: "Claude session window", subtitle: c?.isEstimate == false ? (c?.source ?? "") : "Estimated from your activity")
+                        CardHeader(title: "Claude session window", subtitle: heroSubtitle(c))
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(end.map { Fmt.clock.string(from: $0) } ?? "--").font(Dash.num(15)).foregroundStyle(.white)
@@ -215,6 +215,10 @@ struct DashboardView: View {
                         }
                     }
                     Spacer(minLength: 0)
+                    // The arc shares a row with the countdown, so the layout keeps them apart at any window width;
+                    // drawn behind the whole card it ran through the digits when the window was narrow.
+                    HStack(alignment: .bottom, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         if c?.state == .ready {
                             Text("Ready").font(Dash.hero(84)).foregroundStyle(.white)
@@ -237,7 +241,15 @@ struct DashboardView: View {
                             Text(c?.state == .ready ? "send a message to start the clock" : "until a fresh window").foregroundStyle(Dash.dim)
                         }
                     }
-                    .font(Dash.label).padding(.bottom, 18)
+                    .font(Dash.label)
+                    }
+                    .layoutPriority(1)
+                    WindowArc(progress: elapsed, color: Dash.claude)
+                        .frame(minWidth: 110, maxWidth: 280)
+                        .frame(height: 140)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .padding(.bottom, 18)
                     HStack {
                         Text("Limit used").font(Dash.label).foregroundStyle(Dash.dim)
                         Spacer()
@@ -260,6 +272,17 @@ struct DashboardView: View {
             }
             .frame(height: 312)
         }
+    }
+
+    /// Where the numbers come from, and why they're a guess when they are, e.g. "Estimated from your activity ·
+    /// live usage off". An estimate shouldn't read as confidently as a live reading.
+    private func heroSubtitle(_ c: WindowStatus?) -> String {
+        guard let c else { return "" }
+        let base = c.isEstimate ? "Estimated from your activity" : c.source
+        guard let note = store.estimateNote(for: c) else { return base }
+        // The note starts with "estimated" or "usage unknown"; only its reason adds anything to the base line.
+        let why = note.components(separatedBy: " · ").last ?? note
+        return c.isEstimate ? "\(base) · \(why)" : "\(base) · usage unknown, \(why)"
     }
 
     /// The pacing budget an agent set through reset-mcp: task, cap, where it stands, and a way to clear it,
