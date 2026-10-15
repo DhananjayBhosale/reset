@@ -6,7 +6,9 @@ import UserNotifications
 /// arrive when the Mac is asleep or the lid is closed.
 final class Alerts {
     private let center = UNUserNotificationCenter.current()
-    private let prefix = "reset-"
+    /// v2 ids carry calendar triggers. Older "reset-" requests used interval triggers and are cleared out.
+    private let prefix = "reset2-"
+    private let legacyPrefix = "reset-"
 
     func requestPermission() {
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -33,7 +35,9 @@ final class Alerts {
                 }
             }
         }
-        center.getPendingNotificationRequests { [center, prefix] pending in
+        center.getPendingNotificationRequests { [center, prefix, legacyPrefix] pending in
+            let legacy = pending.map(\.identifier).filter { $0.hasPrefix(legacyPrefix) }
+            if !legacy.isEmpty { center.removePendingNotificationRequests(withIdentifiers: legacy) }
             let have = Set(pending.map(\.identifier).filter { $0.hasPrefix(prefix) })
             let stale = have.subtracting(wanted.keys)
             if !stale.isEmpty { center.removePendingNotificationRequests(withIdentifiers: Array(stale)) }
@@ -46,7 +50,11 @@ final class Alerts {
         c.title = title
         c.body = body
         c.sound = .default
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, at.timeIntervalSinceNow), repeats: false)
+        // A calendar trigger fires at the wall-clock time, including after the Mac wakes from sleep.
+        // An interval trigger counts elapsed time, which drifts across sleep and reports the wrong time.
+        var comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: at)
+        comps.timeZone = TimeZone.current
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         return UNNotificationRequest(identifier: id, content: c, trigger: trigger)
     }
 
@@ -71,6 +79,9 @@ final class Alerts {
         UserDefaults.standard.data(forKey: "ntfyQueued").flatMap { try? JSONDecoder().decode([String: Queued].self, from: $0) } ?? [:]
     }()
     private var inFlight: Set<String> = []
+
+    /// For the self-test: what's queued on ntfy, per provider.
+    var queuedSummary: [String: String] { queued.mapValues { "\(Fmt.when($0.at)) to \($0.destination.split(separator: "/").last ?? "")" } }
 
     private func saveQueued() {
         UserDefaults.standard.set(try? JSONEncoder().encode(queued), forKey: "ntfyQueued")

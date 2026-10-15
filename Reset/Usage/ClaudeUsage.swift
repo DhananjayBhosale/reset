@@ -80,7 +80,9 @@ final class ClaudeUsageScanner {
                 guard let mod = rv?.contentModificationDate, mod >= since else { continue }
                 let size = rv?.fileSize ?? 0
                 seen.insert(url.path)
-                if let c = cache[url.path], c.mtime == mod, c.size == size { results.append(c); continue }
+                // Fresh within 2 s: mtime round-trips through JSON and filesystems differ in precision,
+                // so exact Date equality could miss on an unchanged file and force a needless re-parse.
+                if let c = cache[url.path], abs(c.mtime.timeIntervalSince(mod)) < 2, c.size == size { results.append(c); continue }
                 var r: FileResult
                 if let c = cache[url.path], size > c.offset, c.offset > 0 {
                     // Appended to since last time: parse only the new bytes and merge.
@@ -133,8 +135,16 @@ final class ClaudeUsageScanner {
         for c in new.calls {
             if let b = byId[c.id] {
                 var n = c.output >= b.output ? c : b
-                n.tools = b.tools + c.tools
-                n.mcpServers = b.mcpServers.merging(c.mcpServers, uniquingKeysWith: +)
+                // The same call seen again (same output, same time) is not new content: keep its counts,
+                // so merging a full re-parse into the cache can't inflate tools or MCP calls.
+                // Genuinely appended rows of a streamed response still accumulate.
+                if c.output == b.output && c.time == b.time {
+                    n.tools = b.tools
+                    n.mcpServers = b.mcpServers
+                } else {
+                    n.tools = b.tools + c.tools
+                    n.mcpServers = b.mcpServers.merging(c.mcpServers, uniquingKeysWith: +)
+                }
                 n.time = min(b.time, c.time)
                 byId[c.id] = n
             } else { byId[c.id] = c }

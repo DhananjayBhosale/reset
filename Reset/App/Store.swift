@@ -4,6 +4,7 @@ import Foundation
 import Observation
 import ServiceManagement
 import WidgetKit
+import UserNotifications
 
 /// Per-provider switches, saved in UserDefaults.
 struct ProviderPrefs: Codable, Equatable {
@@ -23,10 +24,10 @@ final class Store {
     var prefs: [String: ProviderPrefs] { didSet { save(prefs, "prefs") } }
     var custom: [CustomProvider] { didSet { save(custom, "custom"); refresh() } }
     var claudeExtraStarts: [Date] { didSet { save(claudeExtraStarts, "claudeExtraStarts"); refresh() } }
-    var leadMinutes: Int { didSet { UserDefaults.standard.set(leadMinutes, forKey: "leadMinutes"); syncAlerts() } }
-    var phoneEnabled: Bool { didSet { UserDefaults.standard.set(phoneEnabled, forKey: "phoneEnabled"); syncAlerts() } }
-    var ntfyServer: String { didSet { UserDefaults.standard.set(ntfyServer, forKey: "ntfyServer"); syncAlerts() } }
-    var ntfyTopic: String { didSet { UserDefaults.standard.set(ntfyTopic, forKey: "ntfyTopic"); syncAlerts() } }
+    var leadMinutes: Int { didSet { UserDefaults.standard.set(leadMinutes, forKey: "leadMinutes"); scheduleAlertSync() } }
+    var phoneEnabled: Bool { didSet { UserDefaults.standard.set(phoneEnabled, forKey: "phoneEnabled"); scheduleAlertSync() } }
+    var ntfyServer: String { didSet { UserDefaults.standard.set(ntfyServer, forKey: "ntfyServer"); scheduleAlertSync() } }
+    var ntfyTopic: String { didSet { UserDefaults.standard.set(ntfyTopic, forKey: "ntfyTopic"); scheduleAlertSync() } }
     var commands: [String: String] { didSet { save(commands, "commands") } }
     var liveClaudeEnabled: Bool {
         didSet {
@@ -114,7 +115,30 @@ final class Store {
         let crossedReset = statuses.contains { s in s.resetsAt.map { $0 <= now } ?? false }
         if crossedReset || now.timeIntervalSince(lastScan) >= 60 { refresh() }
         if now.timeIntervalSince(lastStatusLine) >= 30 { writeStatusLine() }
+        // The MCP server sets budgets from another process; a 5-second look keeps the dashboard current.
+        if now.timeIntervalSince(lastBudgetLook) >= 5 { lastBudgetLook = now; reloadBudget() }
         runAutoStarts()
+    }
+
+    // MARK: Pacing budget
+
+    /// The pacing budget an agent set through reset-mcp, if any. Read-only here apart from clearing it.
+    private(set) var budget: Budget?
+    private var lastBudgetLook = Date.distantPast
+    /// Where the budget lives; tests point this at a temporary file so they never touch the real one.
+    var budgetURL = Budget.url
+
+    func reloadBudget() {
+        let b = Demo.isOn ? Demo.budget : Budget.load(from: budgetURL)
+        // Assigning an equal value would still wake every view observing it.
+        if b != budget { budget = b }
+    }
+
+    func clearBudget() {
+        // Demo mode never touches the real file; its made-up budget simply comes back on the next look.
+        if !Demo.isOn { Budget.clear(at: budgetURL) }
+        budget = nil
+        note("Pacing budget cleared")
     }
 
     func prefs(for id: String) -> ProviderPrefs { prefs[id] ?? ProviderPrefs() }
@@ -151,6 +175,7 @@ final class Store {
         lastScan = Date()
         if Demo.isOn {
             statuses = [Demo.claude()]
+            reloadBudget()
             lastRefresh = Date()
             now = Date()
             mascots.sync()
@@ -184,6 +209,7 @@ final class Store {
                 }
                 self.statuses = list
                 self.lastRefresh = t
+                self.reloadBudget()
                 self.now = Date()
                 self.trackResets()
                 self.writeWidgetSnapshot()
@@ -192,6 +218,11 @@ final class Store {
                 self.syncAlerts()
                 self.runAutoStarts()
                 if self.rescanQueued { self.rescanQueued = false; self.refresh() }
+                if let path = UserDefaults.standard.string(forKey: "selfTest"), !self.wroteSelfTest {
+                    self.wroteSelfTest = true
+                    // Give live usage, the update check and the usage scan a moment to land first.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 12) { self.writeSelfTest(to: path) }
+                }
                 // Test hook: `--args -renderOnboarding /dir` renders every setup step once.
                 if let dir = UserDefaults.standard.string(forKey: "renderOnboarding"), !self.renderedOnboarding {
                     self.renderedOnboarding = true
@@ -214,6 +245,17 @@ final class Store {
                 }
             }
         }
+    }
+
+    private var pendingAlertSync: DispatchWorkItem?
+
+    /// Settings fields change on every keystroke; wait for a 0.5 s pause so typing a topic causes one
+    /// sync (and at most one ntfy withdraw or repost) instead of one per character.
+    private func scheduleAlertSync() {
+        pendingAlertSync?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.syncAlerts() }
+        pendingAlertSync = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     func syncAlerts() {
@@ -262,6 +304,17 @@ final class Store {
         }
     }
 
+    /// API value per day of the current month (index 0 is the 1st). Rows outside the month are skipped,
+    /// including future-dated ones from a clock that runs behind the server, which used to index past the end.
+    static func monthBuckets(_ calls: [Call], monthStart: Date, daysInMonth: Int, calendar cal: Calendar) -> [Double] {
+        var days = Array(repeating: 0.0, count: max(0, daysInMonth))
+        for c in calls where c.time >= monthStart {
+            guard let i = cal.dateComponents([.day], from: monthStart, to: c.time).day, i >= 0, i < days.count else { continue }
+            days[i] += c.cost
+        }
+        return days
+    }
+
     // MARK: Claude Code status line
 
     private var lastStatusLine = Date.distantPast
@@ -288,6 +341,48 @@ final class Store {
         let line = "◷ " + parts.joined(separator: " · ")
         let url = WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("statusline.txt")
         try? line.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: Self-test
+
+    /// Test hook: `-selfTest /path.json` writes Reset's internal state once, so every feature can be
+    /// checked against what it is really doing, not what a label says.
+    func writeSelfTest(to path: String) {
+        let iso = ISO8601DateFormatter()
+        func d(_ x: Date?) -> Any { x.map { iso.string(from: $0) } ?? NSNull() }
+        var out: [String: Any] = [:]
+        out["statuses"] = statuses.map { s -> [String: Any] in
+            ["id": s.id, "enabled": prefs(for: s.id).enabled, "state": "\(s.state)", "used": s.usedPercent ?? NSNull(),
+             "resetsAt": d(s.resetsAt), "estimate": s.isEstimate, "source": s.source, "blockedUntil": d(s.blockedUntil)]
+        }
+        out["live"] = ["enabled": liveClaudeEnabled, "state": "\(liveClaude.state)", "needsSignIn": liveClaude.needsSignIn]
+        out["forecast"] = d(forecast.runsOutAt)
+        out["autoStart"] = ["claude": prefs(for: "claude").autoStart, "command": commands["claude"] ?? "",
+                            "kickDue": kickDue.mapValues { "\(iso.string(from: $0.reset)) tries \($0.attempts)" },
+                            "watchingReset": lastSeenReset.mapValues { iso.string(from: $0) }]
+        out["phone"] = ["enabled": phoneEnabled, "topicSet": !ntfyTopic.isEmpty, "server": ntfyServer, "queued": alerts.queuedSummary]
+        out["keepAwake"] = ["mode": keepAwake.mode.rawValue, "holding": keepAwake.isHolding, "onPower": keepAwake.onPower]
+        out["mascots"] = ["enabled": mascots.enabled, "panels": mascots.panelCount, "placement": mascots.placement.rawValue]
+        out["widgets"] = ["snapshotWritten": d(WidgetSnapshot.load()?.updated), "lastReload": d(lastWidgetReload == .distantPast ? nil : lastWidgetReload)]
+        out["updater"] = ["automatic": updater.automatic, "lastChecked": d(updater.lastChecked), "available": updater.available?.version ?? NSNull(),
+                          "error": updater.lastError ?? NSNull(), "current": Updater.current]
+        out["usage"] = ["calls": usage.calls.count, "lastScan": d(usage.lastScan), "projects": usage.projects.count,
+                        "planMonthly": usage.planMonthlyUSD]
+        out["statusLine"] = (try? String(contentsOf: WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("statusline.txt"))) ?? NSNull()
+        out["look"] = look.rawValue
+        UNUserNotificationCenter.current().getPendingNotificationRequests { reqs in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                out["macNotifications"] = ["authorized": settings.authorizationStatus == .authorized,
+                                           "pending": reqs.map { r -> String in
+                                               let when = (r.trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate()
+                                                   ?? (r.trigger as? UNTimeIntervalNotificationTrigger)?.nextTriggerDate()
+                                               return "\(r.content.title) @ \(when.map { Fmt.when($0) } ?? "?")"
+                                           }]
+                if let data = try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys]) {
+                    try? data.write(to: URL(fileURLWithPath: path))
+                }
+            }
+        }
     }
 
     // MARK: Sign-in
@@ -325,6 +420,7 @@ final class Store {
     var lastWidgetData: Data?
     private var renderedMenu = false
     private var renderedOnboarding = false
+    private var wroteSelfTest = false
 
     /// Writes what the desktop widgets show and asks WidgetKit to redraw, only when something changed.
     func writeWidgetSnapshot() {
@@ -370,7 +466,6 @@ final class Store {
         var proj: [String: Double] = [:]
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
         let daysInMonth = cal.range(of: .day, in: .month, for: Date())?.count ?? 30
-        var mdays = Array(repeating: 0.0, count: daysInMonth)
         for c in usage.calls {
             let d = cal.dateComponents([.day], from: cal.startOfDay(for: c.time), to: today0).day ?? 99
             if d >= 0 && d < 14 { daily[13 - d] += c.cost }
@@ -380,13 +475,13 @@ final class Store {
                 let name = ProjectNames.shared.name(for: c.project)
                 proj[name, default: 0] += c.cost
             }
-            if c.time >= monthStart { mdays[cal.component(.day, from: c.time) - 1] += c.cost }
         }
         func cumulative(_ a: [Double]) -> [Double] { var s = 0.0; return a.map { s += $0; return (s * 100).rounded() / 100 } }
         snap.dailyCost = daily.map { ($0 * 100).rounded() / 100 }
         snap.todayCumulative = cumulative(hourT)
         snap.yesterdayCumulative = cumulative(hourY)
         snap.projects = proj.sorted { $0.value > $1.value }.prefix(6).map { .init(name: $0.key, cost: ($0.value * 100).rounded() / 100) }
+        let mdays = Self.monthBuckets(usage.calls, monthStart: monthStart, daysInMonth: daysInMonth, calendar: cal)
         snap.monthDays = mdays.map { ($0 * 100).rounded() / 100 }
         snap.claudeRunsOutAt = forecast.runsOutAt
         snap.limitDays = Array(Set(usage.limitHits.filter { $0 >= monthStart }.map { cal.component(.day, from: $0) })).sorted()
@@ -397,7 +492,31 @@ final class Store {
         lastWidgetData = key
         snap.updated = Date()
         snap.save()
-        WidgetCenter.shared.reloadAllTimelines()
+        // macOS gives each app a small daily budget of widget reloads (roughly 40 to 70). Asking on every
+        // change got the widgets throttled and frozen on an old value, so only ask when something a widget
+        // shows meaningfully changed: a state change, a 10% usage step, or 30 minutes since the last reload.
+        let state = Self.widgetState(snap.providers)
+        let stale = Date().timeIntervalSince(lastWidgetReload) > 30 * 60
+        if state != lastWidgetState || stale {
+            lastWidgetState = state
+            lastWidgetReload = Date()
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+    }
+
+    private var lastWidgetState = ""
+    private var lastWidgetReload = Date.distantPast
+
+    /// What a widget's look depends on, coarsely: reset time, ready or blocked, usage in 10% steps,
+    /// and the mascot's mood (its 35% and 70% thresholds fall between steps).
+    static func widgetState(_ providers: [WidgetSnapshot.Provider]) -> String {
+        providers.map { p in
+            let step = p.used.map { Int($0 / 10) }.map(String.init) ?? "-"
+            let mood = p.used.map { $0 >= 99.5 ? "asleep" : $0 >= 70 ? "tired" : $0 >= 35 ? "focused" : "fresh" } ?? "-"
+            let reset = p.resetsAt.map { String(Int($0.timeIntervalSince1970 / 60)) } ?? "-"
+            let blocked = p.blockedUntil.map { $0 > Date() } ?? false
+            return "\(p.id):\(reset):\(p.ready):\(blocked):\(step):\(mood):\(p.available)"
+        }.joined(separator: "|")
     }
 
     // MARK: User actions

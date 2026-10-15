@@ -1,0 +1,60 @@
+{
+  "quota.events" : [
+    {
+      "kind" : "activity",
+      "time" : "2026-03-03T13:02:04.000Z"
+    },
+    {
+      "kind" : "activity",
+      "time" : "2026-03-03T15:47:10.000Z"
+    },
+    {
+      "kind" : "fiveHourLimit",
+      "resetsAt" : "2026-03-03T17:10:00.000Z",
+      "time" : "2026-03-03T16:31:55.000Z"
+    },
+    {
+      "kind" : "weeklyLimit",
+      "resetsAt" : "2026-03-07T02:00:00.000Z",
+      "time" : "2026-03-03T17:12:30.000Z"
+    }
+  ],
+  "quota.offset" : 4490,
+  "quota.window@2026-03-03T16:45:00.000Z" : {
+    "end" : "2026-03-03T17:10:00.000Z",
+    "exact" : true,
+    "weeklyBlockUntil" : null
+  },
+  "quota.window@2026-03-03T17:15:00.000Z" : {
+    "end" : null,
+    "exact" : null,
+    "weeklyBlockUntil" : "2026-03-07T02:00:00.000Z"
+  },
+  "streamed.events" : [
+    {
+      "kind" : "activity",
+      "time" : "2026-03-02T09:14:05.120Z"
+    },
+    {
+      "kind" : "activity",
+      "time" : "2026-03-02T09:14:06.300Z"
+    },
+    {
+      "kind" : "activity",
+      "time" : "2026-03-02T09:14:06.900Z"
+    },
+    {
+      "kind" : "activity",
+      "time" : "2026-03-02T09:14:09.450Z"
+    },
+    {
+      "kind" : "activity",
+      "time" : "2026-03-02T09:20:11.000Z"
+    },
+    {
+      "kind" : "activity",
+      "time" : "2026-03-02T09:21:40.000Z"
+    }
+  ],
+  "streamed.offset" : 8284
+}

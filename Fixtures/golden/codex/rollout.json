@@ -1,0 +1,14 @@
+{
+  "blockedUntil" : null,
+  "isEstimate" : false,
+  "secondary" : {
+    "label" : "Weekly",
+    "resetsAt" : "2026-03-07T08:00:00.000Z",
+    "usedPercent" : 15
+  },
+  "source" : "Codex session log",
+  "state" : {
+    "active" : "2026-03-02T13:41:00.000Z"
+  },
+  "usedPercent" : 24
+}

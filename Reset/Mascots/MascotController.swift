@@ -31,11 +31,15 @@ final class MascotController {
 
     private weak var store: Store?
     private var panels: [String: MascotPanel] = [:]
+    /// For the self-test: how many mascot panels are alive.
+    var panelCount: Int { panels.count }
     private var hosts: [String: NSHostingView<AnyView>] = [:]
     private var lastReset: [String: Date] = [:]
     private var wasActive: [String: Bool] = [:]
     private var tracker: Timer?
-    private var moveObservers: [NSObjectProtocol] = []
+    /// One "panel moved" observer per mascot id, so each can be removed with its panel. A flat list
+    /// was never drained, which kept every removed panel alive and its observer firing.
+    private var moveObservers: [String: NSObjectProtocol] = [:]
 
     init() {
         let d = UserDefaults.standard
@@ -67,6 +71,7 @@ final class MascotController {
         let ids = Set(list.map(\.id))
         for (id, p) in panels where !ids.contains(id) {
             p.orderOut(nil)
+            removeMoveObserver(id)
             panels[id] = nil
             hosts[id] = nil
         }
@@ -93,14 +98,25 @@ final class MascotController {
         } else {
             p.setFrameOrigin(defaultFloatOrigin(index: panels.count - 1))
         }
-        moveObservers.append(NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: p, queue: .main) { [weak self] _ in
-            guard let self, self.placement == .float, !self.isPlacing else { return }
+        removeMoveObserver(s.id)
+        moveObservers[s.id] = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: p, queue: .main) { [weak self, weak p] _ in
+            guard let self, let p, self.placement == .float, !self.isPlacing else { return }
             UserDefaults.standard.set(NSStringFromPoint(p.frame.origin), forKey: "mascotOrigin-\(s.id)")
-        })
+        }
         p.orderFrontRegardless()
     }
 
+    /// Stops watching a mascot's panel; called whenever that panel is torn down.
+    private func removeMoveObserver(_ id: String) {
+        if let token = moveObservers.removeValue(forKey: id) { NotificationCenter.default.removeObserver(token) }
+    }
+
+    deinit {
+        for token in moveObservers.values { NotificationCenter.default.removeObserver(token) }
+    }
+
     private func rebuildAll() {
+        for id in Array(moveObservers.keys) { removeMoveObserver(id) }
         for (_, p) in panels { p.orderOut(nil) }
         panels = [:]
         hosts = [:]

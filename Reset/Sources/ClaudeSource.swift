@@ -137,9 +137,11 @@ struct ClaudeSource: WindowSource {
 enum PlanUsageLog {
     struct Sample { var time: Date; var fiveHour: Double; var sevenDay: Double? }
 
-    static func latest(org: String) -> Sample? {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Claude/plan-usage-history.json")
+    static let url = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Claude/plan-usage-history.json")
+
+    /// `url` is only ever not the desktop app's file in the format-drift fixtures.
+    static func latest(org: String, url: URL = PlanUsageLog.url) -> Sample? {
         guard let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let samples = obj["samples"] as? [[String: Any]] else { return nil }

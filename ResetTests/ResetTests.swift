@@ -116,6 +116,18 @@ final class TranscriptTests: XCTestCase {
         XCTAssertEqual(merged.calls.reduce(0) { $0 + $1.cost }, full.calls.reduce(0) { $0 + $1.cost }, accuracy: 1e-12)
     }
 
+    func testMergingAFullReparseDoesNotInflateToolCounts() {
+        // An unchanged file re-parsed in full and merged into its cached result must leave counts alone.
+        let tools = #"[{"type":"tool_use","name":"mcp__github__create_issue"},{"type":"tool_use","name":"Read"}]"#
+        let u = write("a.jsonl", [row("m1", out: 3, content: tools), row("m1", out: 640), row("m2", out: 90, content: tools)])
+        let cached = parse(u)
+        let again = ClaudeUsageScanner.merge(cached, parse(u))
+        XCTAssertEqual(again.calls.reduce(0) { $0 + $1.tools }, cached.calls.reduce(0) { $0 + $1.tools })
+        XCTAssertEqual(again.calls.reduce(0) { $0 + $1.mcpCalls }, cached.calls.reduce(0) { $0 + $1.mcpCalls })
+        XCTAssertEqual(again.calls.reduce(0) { $0 + $1.cost }, cached.calls.reduce(0) { $0 + $1.cost }, accuracy: 1e-12)
+        XCTAssertEqual(again.calls.reduce(0) { $0 + $1.output }, cached.calls.reduce(0) { $0 + $1.output })
+    }
+
     func testHalfWrittenLastLineWaitsForNextScan() {
         let u = dir.appendingPathComponent("a.jsonl")
         try! (row("m1", out: 10) + "\n" + #"{"type":"assistant","timestam"#).write(to: u, atomically: true, encoding: .utf8)
@@ -223,5 +235,29 @@ final class ProjectAndVersionTests: XCTestCase {
         XCTAssertFalse(Updater.isNewer("0.1", than: "0.1"))
         XCTAssertFalse(Updater.isNewer("0.1", than: "0.1.1"))
         XCTAssertTrue(Updater.isNewer("1.0", than: "0.99"))
+    }
+}
+
+
+final class MonthBucketTests: XCTestCase {
+    private func call(_ t: Date, cost: Double) -> Call {
+        Call(id: UUID().uuidString, time: t, model: "claude-opus-5-5", session: "s", project: "/tmp/p", sidechain: false,
+             input: 0, cw5: 0, cw1h: 0, cacheRead: 0, output: 0, advisorTokens: 0, tools: 0, mcpServers: [:],
+             webSearches: 0, mcpAttribution: nil, cost: cost, autoStart: false)
+    }
+
+    func testFutureDatedRowsAreSkippedNotCrashing() {
+        let cal = Calendar.current
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
+        let days = cal.range(of: .day, in: .month, for: monthStart)!.count
+        let calls = [call(monthStart.addingTimeInterval(3600), cost: 2),
+                     call(monthStart.addingTimeInterval(86400 * 1.5), cost: 3),
+                     call(monthStart.addingTimeInterval(86400 * 62), cost: 99),   // about two months ahead
+                     call(monthStart.addingTimeInterval(-86400), cost: 50)]       // last month
+        let b = Store.monthBuckets(calls, monthStart: monthStart, daysInMonth: days, calendar: cal)
+        XCTAssertEqual(b.count, days)
+        XCTAssertEqual(b[0], 2)
+        XCTAssertEqual(b[1], 3)
+        XCTAssertEqual(b.reduce(0, +), 5)
     }
 }

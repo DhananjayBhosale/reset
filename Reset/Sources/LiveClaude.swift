@@ -156,9 +156,15 @@ final class LiveClaude {
             s.isEstimate = false
             s.source = "Live from your Claude account"
         }
-        if let sd = snap.sevenDay, let r = sd.resetsAt, r > now {
-            s.secondary = .init(label: "Weekly", resetsAt: r, usedPercent: sd.percent)
-            if sd.percent >= 100 { s.blockedUntil = r }
+        // Live weekly data is authoritative both ways: it sets the block when the limit is used up,
+        // and clears a stale one (for example from an old transcript limit row) once it isn't.
+        if let sd = snap.sevenDay {
+            if let r = sd.resetsAt, r > now {
+                s.secondary = .init(label: "Weekly", resetsAt: r, usedPercent: sd.percent)
+                s.blockedUntil = sd.percent >= 100 ? r : nil
+            } else {
+                s.blockedUntil = nil
+            }
         }
     }
 }

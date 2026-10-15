@@ -1,0 +1,13 @@
+{
+  "org-fixture-a" : {
+    "fiveHour" : 41.5,
+    "sevenDay" : 33,
+    "time" : "2026-03-02T10:00:00.000Z"
+  },
+  "org-fixture-b" : {
+    "fiveHour" : 0,
+    "sevenDay" : null,
+    "time" : "2026-03-02T10:06:40.000Z"
+  },
+  "org-fixture-missing" : null
+}

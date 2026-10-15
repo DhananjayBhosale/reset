@@ -20,7 +20,7 @@ Everything it reads stays on your Mac.
 - **22 desktop widgets** and **8 looks** for the status card.
 - **Mascots.** Animated desktop pets whose mood and health bar follow your usage: fresh, focused, tired, asleep at the limit, waking at the reset.
 - **Share card.** A 1200 × 675 image of your month for X.
-- **Claude Code integration.** A status line for your terminal and an MCP server, so Claude can check how much window is left and pace itself.
+- **Claude Code integration.** A status line for your terminal and an MCP server, so Claude can check how much window is left and pace itself, including a per-task budget that tells it when to wrap up or switch to a smaller model.
 - **Stay awake.** Keeps the Mac from idle-sleeping (when plugged in, or always) so auto-start and alerts run on time, without a separate app. The display still sleeps.
 - **One-minute setup.** A first-run guide picks your tools, signs Claude Code in, sets up phone alerts with a QR code, and takes your plan price.
 
@@ -71,7 +71,7 @@ The first launch opens a short setup guide that covers all of this. You can run 
 | Value multiple | Press **Add your plan price** on the dashboard and enter what you pay per month. |
 | Stay awake | **Settings → Stay awake**: Off, When plugged in, or Always. Blocks idle sleep only; closing the lid still sleeps the Mac unless it's plugged in with an external display. |
 | Status line | Add to `~/.claude/settings.json`: `"statusLine": {"type": "command", "command": "cat \"$HOME/Library/Application Support/Reset/statusline.txt\""}` |
-| MCP server | `claude mcp add --scope user reset -- /Applications/Reset.app/Contents/MacOS/reset-mcp` |
+| MCP server | `claude mcp add --scope user reset -- /Applications/Reset.app/Contents/MacOS/reset-mcp`. Tools: `get_claude_usage`, plus `set_budget` (task, max window %, optional downshift model) and `clear_budget`. With a budget set, the advice moves from normal to wrap-up at 80% of the cap to downshift at the cap. The active budget shows under the burn bar on the dashboard, with a Clear button. It's kept in `budget.json` next to `widget.json` and never leaves the Mac. |
 
 ## Privacy
 
@@ -102,7 +102,30 @@ No analytics, no accounts, no servers of its own.
 ./scripts/test.sh
 ```
 
-27 unit tests cover pricing, de-duplication, incremental parsing, window estimates, the forecast, project grouping and update checks.
+The unit tests cover pricing, de-duplication, incremental parsing, window estimates, the forecast, project grouping, update checks, the MCP server's JSON-RPC round-trips and budgets, and the format-drift check below.
+
+### Format-drift check
+
+```bash
+./scripts/drift-check.sh                    # compare
+./scripts/drift-check.sh --update-goldens   # rewrite the goldens from the current parsers
+```
+
+`Fixtures/transcripts/` holds small anonymised samples of every log format Reset parses: a streamed multi-row Claude Code session, one that hits the 5-hour and weekly limits, a resumed session that copies rows into a second file, a Codex session with `rate_limits`, and the Claude desktop app's `plan-usage-history.json`. The check parses them with the real parsers and compares the result with `Fixtures/golden/`. It runs as part of `./scripts/test.sh` too (`DriftTests`), and exits non-zero with a diff on any mismatch.
+
+### When the drift check fails
+
+The fixtures are frozen files, so a failure means **Reset's parsing changed**, not that a tool changed its format.
+
+- **You changed a parser on purpose:** read the diff (`diff -ru Fixtures/golden build/drift/actual`). If every difference is one you intended, run `--update-goldens` and commit the new goldens with the parser change.
+- **You didn't mean to change anything:** treat it as a regression and fix the code, not the golden.
+
+**After a Claude Code (or Codex, or Claude desktop) update**, the goldens won't fail by themselves, because they don't read your live logs. To check a new format:
+
+1. Copy a few fresh rows of the changed kind from `~/.claude/projects/…/*.jsonl` (or the other source).
+2. Anonymise them: replace ids, uuids, session ids, request ids, `cwd`, org ids, and all prompt, reply, thinking and signature text. Keep every key and the shape and types of every value; that's what the parsers depend on.
+3. Add them to the matching fixture, or a new one with its own test in `ResetTests/DriftTests.swift`, then run the check. A diff you didn't expect means the new format breaks Reset: fix the parser, then `--update-goldens`.
+4. Before committing, grep `Fixtures/` for your username, home folder and real ids.
 
 ## Demo mode
 

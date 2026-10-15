@@ -263,7 +263,8 @@ struct TodaySmall: View {
                 for (h, v) in (e.snap?.today ?? []).enumerated() where v > 0.02 {
                     let cx = size.width * (CGFloat(h) + 0.5) / 24
                     let n = v > 0.66 ? 3 : v > 0.33 ? 2 : 1
-                    for k in 0..<n { ctx.fill(Path(ellipseIn: CGRect(x: cx - 1.5, y: size.height - 7 + CGFloat(k) * 0, width: 3, height: 3)), with: .color(amber.opacity(0.35 + 0.22 * Double(n)))) }
+                    // Up to three dots stacked in the strip under the bar, so busier hours read as taller columns.
+                    for k in 0..<n { ctx.fill(Path(ellipseIn: CGRect(x: cx - 1.5, y: size.height - 3.2 - CGFloat(k) * 3.2, width: 3, height: 3)), with: .color(amber.opacity(0.35 + 0.22 * Double(n)))) }
                 }
             }
             .frame(height: 44)

@@ -6,10 +6,14 @@ struct CodexSource: WindowSource {
     let id = "codex"
 
     func read(now: Date) -> WindowStatus {
+        read(now: now, root: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions"))
+    }
+
+    /// `root` is only ever not ~/.codex/sessions in the format-drift fixtures.
+    func read(now: Date, root: URL) -> WindowStatus {
         var status = WindowStatus(id: id, name: "Codex", state: .ready, usedPercent: nil,
                                   isEstimate: false, source: "Codex session log", secondary: nil,
                                   canAutoStart: true)
-        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
         guard let latest = Self.latestRateLimits(under: root) else {
             status.state = .unavailable("No Codex sessions with rate limits yet")
             return status

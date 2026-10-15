@@ -5,6 +5,10 @@ import Foundation
 enum Demo {
     static var isOn: Bool { UserDefaults.standard.bool(forKey: "demo") }
 
+    /// Shown instead of the real budget.json, so screenshots never carry a real task name.
+    static let budget = Budget(task: "API rate limiter", maxPercent: 70, downshiftModel: "haiku",
+                               setAt: Date(timeIntervalSince1970: 1_772_442_000))
+
     static let projects: [(String, String, Double)] = [
         ("/Users/demo/Developer/landing-page", "Landing page redesign", 1.0),
         ("/Users/demo/Developer/ios-onboarding", "iOS onboarding flow", 0.8),

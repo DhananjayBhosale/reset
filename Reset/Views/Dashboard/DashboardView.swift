@@ -7,6 +7,7 @@ struct DashboardView: View {
     var flat = false
     @State private var editingPlan = false
     @State private var sharing = false
+    @Environment(\.openWindow) private var openWindow
 
     private var claude: WindowStatus? { store.statuses.first { $0.id == "claude" } }
 
@@ -124,10 +125,23 @@ struct DashboardView: View {
                 .background(RoundedRectangle(cornerRadius: 12).fill(s.id == "claude" ? Color.white.opacity(0.06) : .clear))
             }
             Text("Automations").font(Dash.label).foregroundStyle(Dash.dim).padding(.horizontal, 10).padding(.top, 22).padding(.bottom, 4)
-            sideToggle("Auto-start", on: store.prefs(for: "claude").autoStart)
-            sideToggle("Phone alerts", on: store.phoneEnabled)
-            sideToggle("Mascots", on: store.mascots.enabled)
-            sideToggle("Stay awake", on: store.keepAwake.isHolding)
+            sideToggle("Auto-start", on: store.prefs(for: "claude").autoStart,
+                       help: "Start the next Claude window automatically when one runs out") { v in
+                store.setPrefs("claude") { $0.autoStart = v }
+            }
+            sideToggle("Phone alerts", on: store.phoneEnabled,
+                       help: store.ntfyTopic.isEmpty ? "Set a topic in Settings → Phone alerts first" : "Send reset alerts to your phone through ntfy") { v in
+                if v && store.ntfyTopic.isEmpty { NSApp.activate(ignoringOtherApps: true); openWindow(id: "settings"); return }
+                store.phoneEnabled = v
+            }
+            sideToggle("Mascots", on: store.mascots.enabled, help: "Show the desktop mascots") { v in
+                store.mascots.enabled = v
+            }
+            sideToggle("Stay awake", on: store.keepAwake.mode != .off,
+                       detail: store.keepAwake.mode == .off ? nil : (store.keepAwake.isHolding ? "holding" : "on battery"),
+                       help: "Keep the Mac from idle-sleeping when plugged in, so auto-start and alerts run on time") { v in
+                store.keepAwake.mode = v ? .pluggedIn : .off
+            }
             Spacer()
             if let t = usage.lastScan {
                 Text("Usage read \(Fmt.clock.string(from: t))").font(.system(size: 11)).foregroundStyle(Dash.faint).padding(.horizontal, 10)
@@ -137,13 +151,26 @@ struct DashboardView: View {
         .frame(width: 220)
     }
 
-    private func sideToggle(_ name: String, on: Bool) -> some View {
-        HStack {
-            Text(name).font(.system(size: 12)).foregroundStyle(Color.white.opacity(0.8))
-            Spacer()
-            Text(on ? "On" : "Off").font(.system(size: 12)).foregroundStyle(on ? Dash.claude : Dash.faint)
+    /// A real switch: clicking the row flips the setting, the same one Settings changes.
+    private func sideToggle(_ name: String, on: Bool, detail: String? = nil, help: String, set: @escaping (Bool) -> Void) -> some View {
+        Button { set(!on) } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name).font(.system(size: 12)).foregroundStyle(Color.white.opacity(0.85))
+                    if let detail { Text(detail).font(.system(size: 10)).foregroundStyle(Dash.faint) }
+                }
+                Spacer()
+                ZStack(alignment: on ? .trailing : .leading) {
+                    Capsule().fill(on ? Dash.claude.opacity(0.85) : Color.white.opacity(0.14)).frame(width: 30, height: 17)
+                    Circle().fill(.white).frame(width: 13, height: 13).padding(2)
+                }
+                .animation(.easeOut(duration: 0.15), value: on)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     private func arcProgress(_ s: WindowStatus) -> Double {
@@ -218,10 +245,50 @@ struct DashboardView: View {
                     }
                     .padding(.bottom, 8)
                     BurnBar(fraction: (c?.usedPercent ?? 0) / 100)
+                        .overlay(alignment: .leading) {
+                            // Where the budget's cap sits on the bar, so the line below has a place to point at.
+                            if let b = store.budget {
+                                GeometryReader { g in
+                                    Capsule().fill(.white.opacity(0.85))
+                                        .frame(width: 2, height: 18)
+                                        .offset(x: g.size.width * CGFloat(b.maxPercent) / 100 - 1, y: -3)
+                                }
+                            }
+                        }
+                    if let b = store.budget { budgetLine(b, used: c?.state == .ready ? 0 : c?.usedPercent) }
                 }
             }
             .frame(height: 312)
         }
+    }
+
+    /// The pacing budget an agent set through reset-mcp: task, cap, where it stands, and a way to clear it,
+    /// because a budget nobody clears would otherwise steer every later session.
+    private func budgetLine(_ b: Budget, used: Double?) -> some View {
+        let status = b.status(used: used)
+        let (word, color): (String, Color) = {
+            switch status {
+            case .normal: return ("on pace", Dash.dim)
+            case .wrapUp: return ("wrap up", Color(hex: 0xFFB13D))
+            case .over: return (b.downshiftModel.map { "over, switch to \($0)" } ?? "over, stop", Color(hex: 0xFF5C3A))
+            case .unknown: return ("usage unknown", Dash.dim)
+            }
+        }()
+        return HStack(spacing: 6) {
+            Text("BUDGET").foregroundStyle(Dash.dim)
+            Text(b.task).foregroundStyle(.white).lineLimit(1).truncationMode(.tail)
+            Text("cap \(b.maxPercent)%").foregroundStyle(Dash.dim)
+            Text(word).foregroundStyle(color)
+            Spacer(minLength: 8)
+            Button { store.clearBudget() } label: {
+                HStack(spacing: 3) { Image(systemName: "xmark"); Text("Clear") }
+            }
+            .buttonStyle(.plain).foregroundStyle(.white.opacity(0.8))
+            .help("Remove this budget. Agents stop getting wrap-up and downshift advice for it.")
+        }
+        .font(Dash.label)
+        .padding(.top, 8)
+        .help(b.advice(used: used))
     }
 
     // MARK: Value
