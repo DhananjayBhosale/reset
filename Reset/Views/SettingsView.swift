@@ -233,6 +233,17 @@ struct SettingsView: View {
                     .font(.system(size: 11, design: .monospaced))
                 Text("Runs once, two minutes after a window Reset was watching runs out, while the Mac is awake. Turning this on does not run it now. Skipped while a weekly limit is exhausted. Uses a little of your quota each time.")
                     .font(.caption).foregroundStyle(.secondary)
+                if let last = store.kickLog.last(where: { $0.id == id }) {
+                    HStack {
+                        Text("Last auto-start \(Fmt.when(last.time)): \(last.summary)")
+                            .font(.caption).foregroundStyle(last.ok ? Color.secondary : Color.orange)
+                        if id == "claude", store.autoStartNeedsSignIn {
+                            Spacer()
+                            Button(store.signingIn ? "Waiting for browser…" : "Sign in") { store.fixClaudeSignIn() }
+                                .controlSize(.small).disabled(store.signingIn)
+                        }
+                    }
+                }
             }
         }
     }

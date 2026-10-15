@@ -58,10 +58,11 @@ final class Alerts {
         return UNNotificationRequest(identifier: id, content: c, trigger: trigger)
     }
 
-    func notifyNow(title: String, body: String) {
+    /// `id` keeps a repeat of the same alert (say, a second auto-start failure) replacing the first instead of stacking.
+    func notifyNow(title: String, body: String, id: String? = nil) {
         let c = UNMutableNotificationContent()
         c.title = title; c.body = body; c.sound = .default
-        center.add(UNNotificationRequest(identifier: "\(prefix)forecast-\(Int(Date().timeIntervalSince1970))", content: c,
+        center.add(UNNotificationRequest(identifier: prefix + (id ?? "forecast-\(Int(Date().timeIntervalSince1970))"), content: c,
                                          trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)))
     }
 

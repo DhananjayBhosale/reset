@@ -69,6 +69,8 @@ final class Store {
         didSet { UserDefaults.standard.set(lastSeenReset, forKey: "lastSeenReset") }
     }
     private var kickDue: [String: (reset: Date, attempts: Int)] = [:]
+    /// A kick stopped because Claude Code was signed out, kept so signing in can run it straight away.
+    private var pausedKick: [String: Date] = [:]
     private var armedAt: [String: Date] = [:]
 
     init() {
@@ -220,6 +222,7 @@ final class Store {
                 self.statuses = list
                 self.lastRefresh = t
                 self.reloadBudget()
+                self.checkCLISignInIfNeeded()
                 self.now = Date()
                 self.trackResets()
                 self.writeWidgetSnapshot()
@@ -282,6 +285,7 @@ final class Store {
             if let r = s.resetsAt {
                 lastSeenReset[s.id] = r
                 kickDue[s.id] = nil
+                pausedKick[s.id] = nil
             } else if s.state == .ready, let r = lastSeenReset[s.id], r <= t {
                 lastSeenReset[s.id] = nil
                 let p = prefs(for: s.id)
@@ -304,11 +308,29 @@ final class Store {
             }
             // Two minutes of slack past the reset, so a slightly early estimate does not burn a kick.
             guard s.state == .ready, t >= due.reset.addingTimeInterval(120) else { continue }
-            guard due.attempts < 4 else { kickDue[id] = nil; note("\(s.name): auto-start gave up after 4 tries"); continue }
-            kicker.kick(id, name: s.name, command: cmd, log: note) { [weak self] ok in
+            guard due.attempts < 4 else {
+                kickDue[id] = nil
+                note("\(s.name): auto-start gave up after 4 tries")
+                let last = kickLog.last { $0.id == id }?.summary ?? "it kept failing"
+                warnAutoStart(id, title: "Auto-start couldn't start \(s.name)",
+                              body: "Gave up after 4 tries: \(last). Send a message to start the window yourself.")
+                continue
+            }
+            kicker.kick(id, name: s.name, command: cmd, log: note) { [weak self] outcome in
                 guard let self else { return }
-                if ok { self.kickDue[id] = nil }
-                else if var d = self.kickDue[id] { d.attempts += 1; self.kickDue[id] = d }
+                self.recordKick(id, outcome)
+                switch outcome {
+                case .started:
+                    self.kickDue[id] = nil
+                case .signedOut:
+                    // Retrying signed out only burns attempts; wait for a sign-in instead.
+                    self.kickDue[id] = nil
+                    self.pausedKick[id] = due.reset
+                    self.warnAutoStart(id, title: "Auto-start couldn't start \(s.name)",
+                                       body: "Claude Code is signed out. Open Reset and press Sign in; the window starts right after.")
+                default:
+                    if var d = self.kickDue[id] { d.attempts += 1; self.kickDue[id] = d }
+                }
                 self.refresh()
             }
         }
@@ -379,6 +401,8 @@ final class Store {
                           "error": updater.lastError ?? NSNull(), "current": Updater.current]
         out["usage"] = ["calls": usage.calls.count, "lastScan": d(usage.lastScan), "projects": usage.projects.count,
                         "planMonthly": usage.planMonthlyUSD]
+        out["autoStartLog"] = kickLog.suffix(5).map { ["id": $0.id, "time": iso.string(from: $0.time), "kind": $0.kind, "summary": $0.summary] }
+        out["autoStartNeedsSignIn"] = autoStartNeedsSignIn
         out["logFormat"] = ["verdict": usage.format.verdict.rawValue, "summary": usage.format.summary,
                             "checked": usage.format.checked, "lines": usage.format.lines, "problems": usage.format.problems]
         out["statusLine"] = (try? String(contentsOf: WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("statusline.txt"))) ?? NSNull()
@@ -412,8 +436,88 @@ final class Store {
             guard let self else { return }
             self.signingIn = false
             self.note(ok ? "Claude Code signed in" : "Claude Code sign-in didn't finish")
+            if ok { self.resumeAfterSignIn() }
             self.liveClaude.retryNow { [weak self] in self?.refresh() }
         }
+    }
+
+    // MARK: Auto-start log
+
+    /// Every auto-start run and its outcome, newest last, saved so a failure overnight is still there in the
+    /// morning (the Activity list is in memory only). Kept to the last 30 runs.
+    private(set) var kickLog: [KickRecord] = Store.loadKickLog()
+
+    struct KickRecord: Codable, Equatable {
+        var id: String
+        var time: Date
+        var kind: String
+        var summary: String
+        var ok: Bool { kind == KickOutcome.started.kind || kind == Self.signedInKind }
+        /// Not a run: marks that Claude Code was signed in again, which ends a signed-out warning.
+        static let signedInKind = "signed_in"
+    }
+
+    private static var kickLogURL: URL { WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("kick-log.json") }
+
+    private static func loadKickLog() -> [KickRecord] {
+        guard let d = try? Data(contentsOf: kickLogURL) else { return [] }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .secondsSince1970
+        return (try? dec.decode([KickRecord].self, from: d)) ?? []
+    }
+
+    private func recordKick(_ id: String, _ outcome: KickOutcome) {
+        appendKickRecord(KickRecord(id: id, time: Date(), kind: outcome.kind, summary: outcome.summary))
+    }
+
+    private func appendKickRecord(_ r: KickRecord) {
+        kickLog = Array((kickLog + [r]).suffix(30))
+        guard !Demo.isOn else { return }
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .secondsSince1970
+        if let d = try? enc.encode(kickLog) { try? d.write(to: Self.kickLogURL, options: .atomic) }
+    }
+
+    /// True while Claude's last auto-start failed for lack of a sign-in and nothing has fixed it since.
+    var autoStartNeedsSignIn: Bool { Store.needsSignIn(kickLog, id: "claude") }
+
+    static func needsSignIn(_ log: [KickRecord], id: String) -> Bool {
+        log.last { $0.id == id }?.kind == KickOutcome.signedOut.kind
+    }
+
+    /// After a sign-in: clear the warning and, if the window is still waiting, run the paused kick now.
+    private func resumeAfterSignIn() {
+        guard Store.needsSignIn(kickLog, id: "claude") || pausedKick["claude"] != nil else { return }
+        appendKickRecord(KickRecord(id: "claude", time: Date(), kind: KickRecord.signedInKind, summary: "Claude Code signed in again"))
+        if let r = pausedKick.removeValue(forKey: "claude"),
+           statuses.first(where: { $0.id == "claude" })?.state == .ready, prefs(for: "claude").autoStart {
+            kicker.clearBackoff("claude")
+            kickDue["claude"] = (r, 0)
+        }
+    }
+
+    private var lastCLICheck = Date.distantPast
+    private var cliSeenSignedOut = false
+
+    /// While auto-start is waiting on a sign-in, look every 5 minutes for one done outside Reset
+    /// (`claude auth login` in a terminal). Only a change from signed out to signed in counts: an expired
+    /// token still reports "logged in", and acting on that would retry, fail, and warn again every 5 minutes.
+    private func checkCLISignInIfNeeded() {
+        guard autoStartNeedsSignIn, !Demo.isOn, Date().timeIntervalSince(lastCLICheck) >= 300 else { return }
+        lastCLICheck = Date()
+        ClaudeCLI.status { [weak self] st in
+            guard let self else { return }
+            if !st.signedIn { self.cliSeenSignedOut = true; return }
+            guard self.cliSeenSignedOut else { return }
+            self.cliSeenSignedOut = false
+            self.note("Claude Code signed in again")
+            self.resumeAfterSignIn()
+        }
+    }
+
+    /// Mac notification, plus a phone push when phone alerts are on, for an auto-start that needs you.
+    /// One stable id per provider, so a second failure replaces the first.
+    private func warnAutoStart(_ id: String, title: String, body: String) {
+        alerts.notifyNow(title: title, body: body, id: "autostart-\(id)")
+        if phoneEnabled { alerts.pushNow(title: title, body: body, server: ntfyServer, topic: ntfyTopic, log: note) }
     }
 
     // MARK: Forecast
@@ -555,7 +659,15 @@ final class Store {
 
     func kickNow(_ id: String) {
         guard let cmd = commands[id], let s = statuses.first(where: { $0.id == id }) else { return }
-        kicker.kick(id, name: s.name, command: cmd, force: true, log: note) { [weak self] _ in self?.refresh() }
+        kicker.kick(id, name: s.name, command: cmd, force: true, log: note) { [weak self] outcome in
+            guard let self else { return }
+            // A start you asked for gets the same record and sign-in handling as an automatic one.
+            self.recordKick(id, outcome)
+            if outcome == .signedOut {
+                self.warnAutoStart(id, title: "Couldn't start \(s.name)", body: "Claude Code is signed out. Press Sign in in Reset, then try again.")
+            }
+            self.refresh()
+        }
     }
 
     var launchAtLogin: Bool {

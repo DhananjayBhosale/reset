@@ -12,7 +12,11 @@ struct MenuView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            if store.liveNeedsSignIn { signInBanner }
+            if store.liveNeedsSignIn {
+                signInBanner(title: "Live usage paused", detail: "Claude Code is signed out, so Claude is estimated.")
+            } else if store.autoStartNeedsSignIn {
+                signInBanner(title: "Auto-start can't run", detail: "Claude Code is signed out, so the next window won't start by itself.")
+            }
             if let u = store.updater.available { updateBanner(u) }
             VStack(alignment: .leading, spacing: 12) {
                 if let h = hero {
@@ -82,12 +86,13 @@ struct MenuView: View {
         return "Send a message to start the clock"
     }
 
-    private var signInBanner: some View {
+    /// One banner for both things a signed-out Claude Code breaks; live usage wins when both apply.
+    private func signInBanner(title: String, detail: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color(hex: 0xFFB13D))
             VStack(alignment: .leading, spacing: 1) {
-                Text("Live usage paused").font(.system(size: 12, weight: .semibold))
-                Text("Claude Code is signed out, so Claude is estimated.").font(.system(size: 11)).foregroundStyle(Theme.dim)
+                Text(title).font(.system(size: 12, weight: .semibold))
+                Text(detail).font(.system(size: 11)).foregroundStyle(Theme.dim)
             }
             Spacer()
             Button(store.signingIn ? "Waiting…" : "Fix") { store.fixClaudeSignIn() }
