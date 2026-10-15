@@ -598,7 +598,7 @@ final class Store {
         // macOS gives each app a small daily budget of widget reloads (roughly 40 to 70). Asking on every
         // change got the widgets throttled and frozen on an old value, so only ask when something a widget
         // shows meaningfully changed: a state change, a 10% usage step, or 30 minutes since the last reload.
-        let state = Self.widgetState(snap.providers)
+        let state = Self.widgetState(snap.providers, runsOutAt: snap.claudeRunsOutAt)
         let stale = Date().timeIntervalSince(lastWidgetReload) > 30 * 60
         if state != lastWidgetState || stale {
             lastWidgetState = state
@@ -612,8 +612,11 @@ final class Store {
 
     /// What a widget's look depends on, coarsely: reset time, ready or blocked, usage in 10% steps,
     /// and the mascot's mood (its 35% and 70% thresholds fall between steps).
-    static func widgetState(_ providers: [WidgetSnapshot.Provider]) -> String {
-        providers.map { p in
+    /// The run-out forecast is part of it so the fuse widget's flag appears and moves; rounded to 10 minutes,
+    /// because the projection shifts a little on every reading and each reload spends the daily budget.
+    static func widgetState(_ providers: [WidgetSnapshot.Provider], runsOutAt: Date? = nil) -> String {
+        let out = runsOutAt.map { "out:\(Int($0.timeIntervalSince1970 / 600))" } ?? "out:-"
+        return out + "|" + providers.map { p in
             let step = p.used.map { Int($0 / 10) }.map(String.init) ?? "-"
             let mood = p.used.map { $0 >= 99.5 ? "asleep" : $0 >= 70 ? "tired" : $0 >= 35 ? "focused" : "fresh" } ?? "-"
             let reset = p.resetsAt.map { String(Int($0.timeIntervalSince1970 / 60)) } ?? "-"

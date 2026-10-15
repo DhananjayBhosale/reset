@@ -1,4 +1,5 @@
 import XCTest
+import IOKit.pwr_mgt
 @testable import Reset
 
 /// Auto-start outcomes, judged the way the real failures looked: a signed-out run, a rejected sign-in,
@@ -109,6 +110,42 @@ final class KickOutcomeTests: XCTestCase {
 
     func testRunnerStopsAHungCommandAndSaysSo() {
         XCTAssertEqual(run("sleep 30", timeLimit: 1), .timedOut)
+    }
+
+    // MARK: Staying awake for a run
+
+    /// This process's power assertions with the given name, as macOS reports them.
+    private func assertions(named name: String) -> [[String: Any]] {
+        var out: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&out) == kIOReturnSuccess,
+              let all = out?.takeRetainedValue() as? [NSNumber: [[String: Any]]] else { return [] }
+        return (all[NSNumber(value: getpid())] ?? []).filter { ($0["AssertName"] as? String) == name }
+    }
+
+    func testAwakeHoldTakesBothAssertionsAndLetsGo() {
+        let name = "Reset test hold \(UUID().uuidString)"
+        let hold = AwakeHold(reason: name, seconds: 60)
+        XCTAssertEqual(hold.ids.count, 2)
+        let types = Set(assertions(named: name).compactMap { $0["AssertType"] as? String })
+        XCTAssertEqual(types, ["PreventUserIdleSystemSleep", "NetworkClientActive"])
+        hold.release()
+        hold.release()
+        XCTAssertTrue(assertions(named: name).isEmpty, "released, and a second release is harmless")
+    }
+
+    func testRunnerHoldsTheMacAwakeOnlyWhileARunIsGoing() {
+        let k = Kicker()
+        let done = expectation(description: "kick")
+        k.kick("probe", name: "Probe", command: "sleep 2", log: { _ in }) { _ in done.fulfill() }
+        let during = expectation(description: "checked during the run")
+        var held = 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            held = self.assertions(named: "Reset is starting your next Probe window").count
+            during.fulfill()
+        }
+        wait(for: [during, done], timeout: 20)
+        XCTAssertEqual(held, 2, "held while the command runs")
+        XCTAssertTrue(assertions(named: "Reset is starting your next Probe window").isEmpty, "let go when it ends")
     }
 
     // MARK: Signed-out warning

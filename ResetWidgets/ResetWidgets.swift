@@ -5,6 +5,7 @@ import WidgetKit
 struct ResetWidgets: WidgetBundle {
     var body: some Widget {
         ClaudeWidget()
+        FuseWidget()
         WeekWidget()
         MoreWidgets().body
         InstrumentWidgets().body

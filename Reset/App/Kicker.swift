@@ -1,4 +1,5 @@
 import Foundation
+import IOKit.pwr_mgt
 
 /// What one auto-start run achieved. Exit codes alone can't say: a signed-out Claude Code and a run that
 /// never reached the API both just "fail", and only one of them needs you.
@@ -130,8 +131,12 @@ final class Kicker {
             if p.isRunning { timedOut = true; p.terminate() }
         }
         let started = Date()
+        // A run often starts in a few-second background wake while the Mac sleeps on battery; without this the
+        // Mac dozes off mid-run and the window opens minutes late. Held only for the run, capped at its limit.
+        let awake = AwakeHold(reason: "Reset is starting your next \(name) window", seconds: timeLimit + 30)
         p.terminationHandler = { [weak self] proc in
             timeout.cancel()
+            awake.release()
             _ = reader.wait(timeout: .now() + 5)
             let text = String(data: collected, encoding: .utf8) ?? ""
             stopped.lock(); let wasTimedOut = timedOut; stopped.unlock()
@@ -158,6 +163,7 @@ final class Kicker {
             try p.run()
             DispatchQueue.global().asyncAfter(deadline: .now() + timeLimit, execute: timeout)
         } catch {
+            awake.release()
             running.remove(id)
             log("\(name) auto-start could not run: \(error.localizedDescription)")
             done(.failed("couldn't run the command: \(error.localizedDescription)"))
@@ -193,4 +199,36 @@ final class Kicker {
         }
         return nil
     }
+}
+
+/// Asks macOS not to sleep for a short while, on battery too, and lets go when released or when time runs out.
+/// Two assertions: idle-sleep prevention for a normal wake, and "network client active", which is what keeps a
+/// background (dark) wake from dropping back to sleep while a request is in flight.
+final class AwakeHold {
+    private(set) var ids: [IOPMAssertionID] = []
+    private let lock = NSLock()
+
+    init(reason: String, seconds: TimeInterval) {
+        for type in [kIOPMAssertionTypePreventUserIdleSystemSleep, "NetworkClientActive"] {
+            let props: [String: Any] = [
+                kIOPMAssertionTypeKey: type,
+                kIOPMAssertionNameKey: reason,
+                kIOPMAssertionLevelKey: kIOPMAssertionLevelOn,
+                // macOS lets go by itself after this, so a run that never ends can't keep the Mac awake.
+                kIOPMAssertionTimeoutKey: seconds,
+                kIOPMAssertionTimeoutActionKey: kIOPMAssertionTimeoutActionRelease,
+            ]
+            var id: IOPMAssertionID = 0
+            if IOPMAssertionCreateWithProperties(props as CFDictionary, &id) == kIOReturnSuccess { ids.append(id) }
+        }
+    }
+
+    /// Safe to call more than once.
+    func release() {
+        lock.lock(); defer { lock.unlock() }
+        for id in ids { IOPMAssertionRelease(id) }
+        ids = []
+    }
+
+    deinit { release() }
 }
