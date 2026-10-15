@@ -88,7 +88,7 @@ struct SettingsView: View {
             } header: {
                 Text("Look")
             } footer: {
-                Text("How each provider is drawn in the menu and the Reset card widget.").foregroundStyle(.secondary)
+                Text("How each provider is drawn in the menu.").foregroundStyle(.secondary)
             }
 
             Section {

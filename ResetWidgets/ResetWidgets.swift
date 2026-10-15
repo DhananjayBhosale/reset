@@ -5,8 +5,6 @@ import WidgetKit
 struct ResetWidgets: WidgetBundle {
     var body: some Widget {
         ClaudeWidget()
-        LookWidget()
-        AllProvidersWidget()
         WeekWidget()
         MoreWidgets().body
         InstrumentWidgets().body
@@ -159,81 +157,6 @@ struct ClaudeSmall: View {
         var s = p.resetsAt.map { "resets " + $0.formatted(date: .omitted, time: .shortened) } ?? ""
         if let u = p.used { s += " · \(Int((100 - u).rounded()))% left" }
         return s
-    }
-}
-
-// MARK: Medium: Claude in your chosen look
-
-struct LookWidget: Widget {
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "reset.look", provider: Provider()) { e in LookMedium(e: e) }
-            .configurationDisplayName("Reset card")
-            .description("Claude's window in the look you picked in Reset: Glow, Paper, Departure board and more.")
-            .supportedFamilies([.systemMedium])
-            .contentMarginsDisabled()
-    }
-}
-
-struct LookMedium: View {
-    let e: Entry
-    var body: some View {
-        Group {
-            if let p = e.snap?.claude {
-                let window: TimeInterval = 5 * 3600
-                LookCard(look: e.snap?.look ?? .glow,
-                         d: CardData(id: p.id, name: p.name, color: W.color(p.id), windowStart: p.resetsAt?.addingTimeInterval(-window),
-                                     resetsAt: p.resetsAt, ready: p.ready, blockedUntil: p.blockedUntil, used: p.used,
-                                     mascot: W.mascot(p.id, p, at: e.date), windowLength: window),
-                         now: e.date)
-                    .environment(\.lookUsesTimerText, true)
-            } else {
-                Text("Open Reset").foregroundStyle(W.dim)
-            }
-        }
-        .containerBackground(for: .widget) { Color.clear }
-    }
-}
-
-// MARK: Medium: all providers
-
-struct AllProvidersWidget: Widget {
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: "reset.all", provider: Provider()) { e in AllMedium(e: e) }
-            .configurationDisplayName("All your AIs")
-            .description("Every provider's mascot, health and countdown.")
-            .supportedFamilies([.systemMedium])
-    }
-}
-
-struct AllMedium: View {
-    let e: Entry
-    var body: some View {
-        let list = Array((e.snap?.providers ?? []).prefix(4))
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Reset").font(.system(size: 12, weight: .medium)).foregroundStyle(W.dim)
-                Spacer()
-                if let c = e.snap?.weekCost { Text("this week \(money(c))").font(.system(size: 11)).foregroundStyle(W.dim) }
-            }
-            if list.isEmpty {
-                Spacer(); Text("Open Reset to start").foregroundStyle(W.dim); Spacer()
-            } else {
-                HStack(alignment: .bottom, spacing: 10) {
-                    ForEach(list) { p in
-                        VStack(spacing: 4) {
-                            if let img = W.mascot(p.id, p, at: e.date) {
-                                img.resizable().aspectRatio(contentMode: .fit).frame(height: 54)
-                            }
-                            Countdown(p: p, date: e.date, size: 15, align: .center).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
-                            Segments(health: W.health(p, at: e.date), color: W.color(p.id), count: 8)
-                            Text(p.name).font(.system(size: 10)).foregroundStyle(W.dim).lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-            }
-        }
-        .containerBackground(for: .widget) { W.bg }
     }
 }
 
