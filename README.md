@@ -4,6 +4,8 @@
 
 <p align="center">Know exactly when your AI usage window resets, get pinged on your phone when it does, and see what your usage is actually worth.</p>
 
+<p align="center"><a href="https://msfbeast.github.io/reset/"><b>Website</b></a> · <a href="https://github.com/msfbeast/reset/releases/latest"><b>Download</b></a> · <a href="#troubleshooting">Troubleshooting</a></p>
+
 <p align="center"><img src="docs/share-card.png" width="720" alt="Reset share card"></p>
 
 Reset is a free, open source macOS app for people who live inside Claude Code (with Codex, Gemini CLI and Antigravity support too). It sits in your menu bar, counts down to your next fresh window, and turns your local usage logs into a dashboard, desktop widgets and a card you can post.
