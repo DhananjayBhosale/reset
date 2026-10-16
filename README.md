@@ -75,6 +75,40 @@ The first launch opens a short setup guide that covers all of this. You can run 
 | Status line | **Settings → Advanced** has a Copy button, or add to `~/.claude/settings.json`: `"statusLine": {"type": "command", "command": "cat \"$HOME/Library/Application Support/Reset/statusline.txt\""}` |
 | MCP server | `claude mcp add --scope user reset -- /Applications/Reset.app/Contents/MacOS/reset-mcp`. Tools: `get_claude_usage`, plus `set_budget` (task, max window %, optional downshift model) and `clear_budget`. With a budget set, the advice moves from normal to wrap-up at 80% of the cap to downshift at the cap. The active budget shows under the burn bar on the dashboard, with a Clear button. It's kept in `budget.json` next to `widget.json` and never leaves the Mac. |
 
+## Troubleshooting
+
+**macOS says it can't open Reset.** It isn't notarized yet. Open it once, close the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway**. You only do this once.
+
+**I don't see Reset's widgets.** The download is ad-hoc signed, and macOS only lists widgets from apps signed with an Apple Development certificate. Build it yourself with your team ID (see [Install](#install)); a free Apple ID works. If they still don't appear, log out and back in so macOS refreshes the widget list.
+
+**The menu or widgets say "estimated".** Reset is guessing from your Claude Code activity instead of reading your real usage. Turn on **Settings → General → Live usage from your Claude account**. The note says why it's guessing:
+- *live usage off*: turn it on.
+- *Claude Code signed out*: press **Fix** in the menu, or run `claude auth login` in Terminal.
+- *waiting for live usage*: it was just switched on or Reset just started; give it a minute.
+- *live usage unavailable*: Settings → General shows the reason under the switch.
+
+If macOS asks whether `security` may read "Claude Code-credentials" from your Keychain, click **Always Allow**. That's how Reset reads Claude Code's sign-in.
+
+**The countdown is off, or the window started earlier than Reset thinks.** Without live usage, Reset can't see Claude used on claude.ai or in the desktop app, only Claude Code. Live usage fixes this. Without it, pick **I just used Claude on the web** from the menu's **…** button when you start there.
+
+**The menu bar shows only the countdown, with no percentage.** There's no usage reading yet, and Reset won't show the clock as if it were usage. Turn on live usage. Want plain text instead of the colored pill? **Settings → Appearance → Menu bar**.
+
+**Phone alerts don't arrive.** Check that the topic in **Settings → General → Phone alerts** matches the one you subscribed to in the ntfy app exactly, then press **Send test**. Make sure notifications are allowed for ntfy on your phone, and to get through Do Not Disturb, allow high-priority alerts for that topic in the ntfy app.
+
+**Mac notifications don't show.** Allow them in **System Settings → Notifications → Reset**.
+
+**Auto-start didn't run.** **Settings → Automation** shows each tool's last run and why it failed, with a **Sign in** button if Claude Code was signed out. Also know that auto-start:
+- only runs for a window Reset watched run out, never right when you switch it on;
+- is skipped while a weekly limit is used up;
+- needs the Claude Code command-line tool installed and signed in;
+- runs late if the Mac was asleep. **Settings → Automation → Stay awake** keeps it awake when plugged in or always.
+
+**Settings shows a "Claude Code log format" warning.** A Claude Code update probably changed how it writes its logs, so some usage can't be read. Check for a Reset update in the same box, or report it.
+
+**Something else.** **Settings → Advanced → Report a problem** opens a GitHub issue with versions and on/off states filled in, never usage numbers, paths, project names or your phone topic. You see everything before sending.
+
+**Uninstalling.** Quit Reset, drag it to the Trash, and delete `~/Library/Application Support/Reset`. If you set them up, also run `claude mcp remove --scope user reset` and remove the `statusLine` entry from `~/.claude/settings.json`.
+
 ## Privacy
 
 Reset reads local files only:
