@@ -24,6 +24,21 @@ struct MenuBarGlance: Equatable {
     /// Left at or below this is "low". Matches where the menu's health bar turns red.
     static let lowPercent = 15.0
 
+    /// Which entries the bar speaks for. The account the Claude Code CLI is signed in to ("claude") is the one in
+    /// use, so while its window runs the bar follows it alone: a second account that's merely unused reads "ready"
+    /// (a green "Pro ready" hid Team's 45% and its run-out warning), and its weekly limit or sooner reset says
+    /// nothing about the window you're spending. Otherwise a weekly limit, then a fresh window, then the soonest reset.
+    static func pick(_ candidates: [WindowStatus], now: Date)
+        -> (ready: WindowStatus?, soonest: WindowStatus?, blocked: WindowStatus?) {
+        if let main = candidates.first(where: { $0.id == "claude" }), main.resetsAt != nil,
+           (main.blockedUntil ?? .distantPast) <= now {
+            return (nil, main, nil)
+        }
+        return (candidates.first { $0.state == .ready && $0.blockedUntil == nil },
+                candidates.filter { $0.resetsAt != nil }.min { $0.resetsAt! < $1.resetsAt! },
+                candidates.first { ($0.blockedUntil ?? .distantPast) > now })
+    }
+
     static func make(ready: WindowStatus?, soonest: WindowStatus?, blocked: WindowStatus?, runsOutAt: Date?,
                      signedOut: Bool, now: Date) -> MenuBarGlance? {
         // A weekly limit outranks everything: no countdown or "ready" would be true until it lifts.

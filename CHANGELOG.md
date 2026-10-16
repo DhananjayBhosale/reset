@@ -2,6 +2,10 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.13 — the menu bar follows the account you're using
+
+- With two Claude accounts, the menu bar showed a green "Pro ready" just because the second account was unused, hiding the signed-in account's countdown, what's left and the run-out warning. While that account's window runs, the menu bar now shows only it.
+
 ## 0.3.12 — costs per account
 
 - With more than one Claude account, the dashboard has an All / Team / Pro switch: costs, sessions, projects, this week's windows, the heatmap and the share card for just that account.

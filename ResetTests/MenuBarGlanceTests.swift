@@ -82,6 +82,25 @@ final class MenuBarGlanceTests: XCTestCase {
         XCTAssertEqual(MenuBarGlance.words(20), "less than a minute")
     }
 
+    func testTheAccountInUseOutranksAnUnusedSecondAccount() {
+        // Team (the CLI's account) at 45% left; Pro unused, so "ready", with a sooner reset elsewhere and a weekly limit.
+        let team = s(.active(resetsAt: now.addingTimeInterval(3 * 3600)), name: "Claude · Team", used: 55)
+        let pro = s(.ready, id: "claude-6ac79bdb", name: "Claude · Pro")
+        let proSooner = s(.active(resetsAt: now.addingTimeInterval(600)), id: "claude-6ac79bdb", name: "Claude · Pro")
+        let proBlocked = s(.ready, id: "claude-6ac79bdb", name: "Claude · Pro", blockedFor: 86400)
+        for other in [pro, proSooner, proBlocked] {
+            let p = MenuBarGlance.pick([other, team], now: now)
+            XCTAssertNil(p.ready); XCTAssertNil(p.blocked)
+            XCTAssertEqual(p.soonest?.id, "claude", "\(other.state)")
+        }
+        // Between Team windows, Pro being ready is worth saying.
+        let p = MenuBarGlance.pick([s(.ready, name: "Claude · Team"), pro], now: now)
+        XCTAssertEqual(p.ready?.id, "claude")
+        // Team's own weekly limit still shows.
+        let teamBlocked = s(.active(resetsAt: now.addingTimeInterval(3600)), blockedFor: 86400)
+        XCTAssertEqual(MenuBarGlance.pick([teamBlocked, pro], now: now).blocked?.id, "claude")
+    }
+
     func testNothingToShow() {
         XCTAssertNil(glance())
     }

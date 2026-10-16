@@ -189,25 +189,21 @@ final class Store {
         return alerted.isEmpty ? visible : alerted
     }
 
-    var soonest: WindowStatus? {
-        barCandidates.filter { $0.resetsAt != nil }.min { $0.resetsAt! < $1.resetsAt! }
-    }
+    /// The entry whose countdown the bar shows (see MenuBarGlance.pick).
+    var soonest: WindowStatus? { MenuBarGlance.pick(barCandidates, now: now).soonest }
 
     /// A tracked provider whose longer (weekly) limit is used up, which the menu bar shows ahead of everything.
-    var blockedForBar: WindowStatus? {
-        barCandidates.first { ($0.blockedUntil ?? .distantPast) > now }
-    }
+    var blockedForBar: WindowStatus? { MenuBarGlance.pick(barCandidates, now: now).blocked }
 
     /// What the menu bar shows right now (see MenuBarGlance).
     var glance: MenuBarGlance? {
-        MenuBarGlance.make(ready: readyForBar, soonest: soonest, blocked: blockedForBar, runsOutAt: forecast.runsOutAt,
-                           signedOut: liveNeedsSignIn, now: now)
+        let p = MenuBarGlance.pick(barCandidates, now: now)
+        return MenuBarGlance.make(ready: p.ready, soonest: p.soonest, blocked: p.blocked, runsOutAt: forecast.runsOutAt,
+                                  signedOut: liveNeedsSignIn, now: now)
     }
 
     /// A tracked provider with a fresh window waiting, shown in the bar ahead of any countdown.
-    var readyForBar: WindowStatus? {
-        barCandidates.first { $0.state == .ready && $0.blockedUntil == nil }
-    }
+    var readyForBar: WindowStatus? { MenuBarGlance.pick(barCandidates, now: now).ready }
 
     func refresh() {
         lastScan = Date()
