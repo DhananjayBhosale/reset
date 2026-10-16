@@ -165,6 +165,9 @@
       <div class="card"><div class="k">📱</div><h3>Phone alerts</h3><p>A ping at the reset through the free ntfy app, queued ahead of time so it arrives even with your Mac asleep.</p></div>
       <div class="card"><div class="k">⚡</div><h3>Auto-start</h3><p>Optional: when a window runs out, Reset sends one short message so the next one starts right away. Or press Start now in a widget.</p></div>
       <div class="card"><div class="k">📊</div><h3>What it's worth</h3><p>A dashboard with the API-price value of your usage against your plan, cache savings, every window this week, and cost per project.</p></div>
+      <div class="card"><div class="k">👥</div><h3>Work and personal</h3><p>A Team account and a personal Pro plan each get their own window, costs and plan price. Switch between them, or see both together.</p></div>
+      <div class="card"><div class="k">📅</div><h3>Weekly limit, early</h3><p>On Pro and Max, Reset warns from 80% of the weekly limit, so you can pace the week instead of finding out when it's used up.</p></div>
+      <div class="card"><div class="k">🔔</div><h3>Alerts you can act on</h3><p>Notifications open the dashboard, with Start now and Sign in buttons right on them. Times follow your 12 or 24-hour clock.</p></div>
       <div class="card"><div class="k">🔒</div><h3>Private by design</h3><p>Reads local logs only. No accounts, no analytics, no servers. Anything that leaves your Mac is opt-in.</p></div>
     </div>
   </div>
@@ -196,6 +199,8 @@
           <li>API-price value of your tokens against what you pay</li>
           <li>Every 5-hour window of the week: yours, auto-started, and the ones that hit the limit</li>
           <li>Token mix, when you build, cost per session and per project</li>
+          <li>Work and personal accounts apart, each against its own plan price</li>
+          <li>Right-click a session to copy the command that resumes it</li>
           <li>A share card of your month for X</li>
         </ul>
       </div>
@@ -208,14 +213,15 @@
   <div class="wrap">
     <div class="eyebrow">For Claude Code</div>
     <h2>Let Claude pace itself.</h2>
-    <p class="lead">An MCP server tells Claude how much window is left, and lets it set a budget for a task: wrap up at 80% of the cap, switch to a smaller model past it. A status line keeps the numbers in your terminal.</p>
+    <p class="lead">An MCP server tells Claude how much window is left, including the weekly limit, and lets it set a budget for a task: wrap up at 80% of the cap, switch to a smaller model past it. A status line keeps the numbers in your terminal, and says so when Reset isn't running instead of showing old ones. Set both up with one click in Settings.</p>
     <div class="code" style="margin-top:36px">
       <pre><span class="c"># Your terminal's status line</span>
 ◷ Claude 42% left · 2h 46m to 11:15 PM · <span class="o">budget 70%</span> · $22 today
 
 <span class="c"># Claude, mid-task, via the MCP server</span>
 get_claude_usage → <span class="g">"Within budget for “Refactor auth”: 30% of the window used, cap 70%."</span></pre>
-      <pre><span class="c"># One command to connect it</span>
+      <pre><span class="c"># One click: Settings → Advanced → Add for me</span>
+<span class="c"># Or by hand:</span>
 claude mcp add --scope user reset -- \
   /Applications/Reset.app/Contents/MacOS/reset-mcp
 
