@@ -31,6 +31,47 @@ final class AccountsTests: XCTestCase {
         XCTAssertFalse(p.canAutoStart, "auto-start goes through the CLI's account")
     }
 
+    /// A plan-usage log with one reading per (hours ago, 7-day %) for org "pro".
+    private func planLog(_ rows: [(Double, Double)]) throws -> URL {
+        let samples = rows.map { ["org": "pro", "t": now.addingTimeInterval(-$0.0 * 3600).timeIntervalSince1970 * 1000,
+                                  "u": ["fh": 0, "sd": $0.1]] as [String: Any] }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        try JSONSerialization.data(withJSONObject: ["version": 1, "samples": samples]).write(to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    func testUsedUpWeeklyLimitBlocksUntilTheLatestItCanLift() throws {
+        // Reset seen 5 days ago (73 → 0), used up 2 days ago: due back by 2 days from now, 7 days after that reset.
+        let log = try planLog([(130, 73), (120, 0), (60, 90), (48, 100), (40, 100)])
+        let hit = try XCTUnwrap(PlanUsageLog.weeklyHit(org: "pro", now: now, url: log))
+        XCTAssertEqual(hit.at, now.addingTimeInterval(-48 * 3600), "first seen used up")
+        XCTAssertEqual(hit.liftsBy, now.addingTimeInterval(48 * 3600))
+        let p = ClaudeSource.status(id: "claude-pro", name: "Claude · Pro", events: [], org: "pro", now: now,
+                                    canAutoStart: false, planLog: log)
+        XCTAssertEqual(p.blockedUntil, hit.liftsBy, "not \"ready\" while the limit may still be on")
+        XCTAssertTrue(p.source.contains("lifts by about"), p.source)
+    }
+
+    func testWeeklyLimitIsOverOnceItsDueOrClaudeCodeRepliedSince() throws {
+        // Reset seen 8 days ago, used up 3 days ago: it was due by a day ago (the user's real case: Fri → Fri).
+        let past = try planLog([(200, 78), (192, 0), (72, 100)])
+        XCTAssertNil(PlanUsageLog.weeklyHit(org: "pro", now: now, url: past))
+        let p = ClaudeSource.status(id: "claude-pro", name: "Claude · Pro", events: [], org: "pro", now: now,
+                                    canAutoStart: false, planLog: past)
+        XCTAssertNil(p.blockedUntil); XCTAssertEqual(p.state, .ready); XCTAssertFalse(p.source.contains("weekly"))
+
+        // No reset on record: 7 days after the used-up reading. A reply on this account after it proves it lifted.
+        let log = try planLog([(30, 100)])
+        XCTAssertEqual(PlanUsageLog.weeklyHit(org: "pro", now: now, url: log)?.liftsBy, now.addingTimeInterval((168 - 30) * 3600))
+        let replied = ClaudeSource.status(id: "claude-pro", name: "Claude · Pro", events: [act(60, "pro")], org: "pro", now: now,
+                                          canAutoStart: false, planLog: log)
+        XCTAssertNil(replied.blockedUntil)
+
+        // Not used up: nothing to say.
+        XCTAssertNil(PlanUsageLog.weeklyHit(org: "pro", now: now, url: try planLog([(10, 0), (5, 64)])))
+    }
+
     func testNames() {
         XCTAssertEqual(ClaudeSource.planLabel("team"), "Team")
         XCTAssertEqual(ClaudeSource.planLabel("max"), "Max")

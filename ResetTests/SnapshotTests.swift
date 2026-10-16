@@ -77,6 +77,10 @@ final class SnapshotTests: XCTestCase {
 
     private func check(_ view: some View, _ name: String, width: Double? = nil,
                        file: StaticString = #filePath, line: UInt = #line) throws {
+        // GitHub's Macs run another macOS, so the references can't match there (see the note at the top).
+        if ProcessInfo.processInfo.environment["RESET_SKIP_SNAPSHOTS"] == "1" {
+            throw XCTSkip("Snapshots only compare on the Mac that recorded them")
+        }
         let sized = AnyView(view.frame(width: width.map { CGFloat($0) }).environment(\.colorScheme, .dark))
         let r = ImageRenderer(content: sized)
         r.scale = 2

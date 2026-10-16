@@ -106,7 +106,7 @@ struct ClaudeSource: WindowSource {
 
     /// The window, limit hits and desktop-app reading for one account's events.
     static func status(id: String, name: String, events: [TranscriptScanner.Event], org: String?, now: Date,
-                       canAutoStart: Bool) -> WindowStatus {
+                       canAutoStart: Bool, planLog: URL = PlanUsageLog.url) -> WindowStatus {
         var status = WindowStatus(id: id, name: name, state: .ready, usedPercent: nil, isEstimate: true,
                                   source: "Estimated from Claude Code activity", secondary: nil, canAutoStart: canAutoStart)
         status.account = org
@@ -125,7 +125,7 @@ struct ClaudeSource: WindowSource {
 
         // Real usage % from the Claude desktop app's own log, for this account.
         // A reading only counts if it was taken inside the current window; older ones describe a past window.
-        if let org, let sample = PlanUsageLog.latest(org: org) {
+        if let org, let sample = PlanUsageLog.latest(org: org, url: planLog) {
             let windowStart = status.resetsAt?.addingTimeInterval(-window)
             // The desktop app only logs at moments like a window starting or the limit being hit, so a reading
             // is only trusted while fresh. A limit hit stays true for the rest of its window.
@@ -134,9 +134,14 @@ struct ClaudeSource: WindowSource {
                 status.usedPercent = sample.fiveHour
                 status.usageAsOf = sample.time
             }
-            // A used-up weekly limit, when no limit message gave its reset time: say so rather than nothing.
-            if status.blockedUntil == nil, let sd = sample.sevenDay, sd >= 100, now.timeIntervalSince(sample.time) < 7 * 86400 {
-                status.source += " · weekly limit used up as of \(Fmt.when(sample.time, now: now))"
+            // A used-up weekly limit, when no limit message gave its reset time. Saying only "used up as of Tue" left
+            // the entry reading "ready" for a week whether or not the limit had lifted, so it blocks until the
+            // latest it can lift; Claude Code replies on this account since the reading prove it already has.
+            if status.blockedUntil == nil, let hit = PlanUsageLog.weeklyHit(org: org, now: now, url: planLog),
+               (status.lastActivity ?? .distantPast) <= hit.stillAt {
+                status.secondary = .init(label: "Weekly limit hit", resetsAt: hit.liftsBy, usedPercent: 100)
+                status.blockedUntil = hit.liftsBy
+                status.source += " · weekly limit hit \(Fmt.when(hit.at, now: now)), lifts by about \(Fmt.when(hit.liftsBy, now: now))"
             }
         }
         return status
@@ -213,16 +218,39 @@ enum PlanUsageLog {
     static let url = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Claude/plan-usage-history.json")
 
-    /// `url` is only ever not the desktop app's file in the format-drift fixtures.
+    /// `url` is only ever not the desktop app's file in the format-drift fixtures and tests.
     static func latest(org: String, url: URL = PlanUsageLog.url) -> Sample? {
+        samples(org: org, url: url).last
+    }
+
+    /// One organization's readings, oldest first.
+    static func samples(org: String, url: URL = PlanUsageLog.url) -> [Sample] {
         guard let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let samples = obj["samples"] as? [[String: Any]] else { return nil }
-        for s in samples.reversed() where (s["org"] as? String) == org {
-            guard let t = s["t"] as? Double, let u = s["u"] as? [String: Any], let fh = u["fh"] as? Double else { continue }
+              let rows = obj["samples"] as? [[String: Any]] else { return [] }
+        return rows.compactMap { s in
+            guard (s["org"] as? String) == org, let t = s["t"] as? Double, let u = s["u"] as? [String: Any],
+                  let fh = u["fh"] as? Double else { return nil }
             return Sample(time: Date(timeIntervalSince1970: t / 1000), fiveHour: fh, sevenDay: u["sd"] as? Double)
         }
-        return nil
+    }
+
+    /// The weekly limit's state when the latest reading says it's used up: when it was first seen used up, the
+    /// latest reading that still said so, and the latest it can lift. The weekly limit resets once every 7 days, and the first reading after a drop shows a reset had
+    /// happened by then, so the next one is due by 7 days after that reading. Without a drop on record, 7 days after
+    /// the used-up reading bounds it. Nil once that's passed, or when the limit isn't used up.
+    static func weeklyHit(org: String, now: Date, url: URL = PlanUsageLog.url) -> (at: Date, stillAt: Date, liftsBy: Date)? {
+        let all = samples(org: org, url: url).filter { $0.sevenDay != nil }
+        guard let last = all.last, let sd = last.sevenDay, sd >= 100 else { return nil }
+        let week: TimeInterval = 7 * 86400
+        var lastReset: Date?
+        for (a, b) in zip(all, all.dropFirst()) where b.sevenDay! < a.sevenDay! { lastReset = b.time }
+        // A drop whose next reset would already have come before the used-up reading is from an older cycle
+        // (or the schedule moved); fall back to the reading itself.
+        var liftsBy = last.time.addingTimeInterval(week)
+        if let r = lastReset, r.addingTimeInterval(week) > last.time { liftsBy = r.addingTimeInterval(week) }
+        let first = all.reversed().prefix { $0.sevenDay! >= 100 }.last ?? last
+        return liftsBy > now ? (first.time, last.time, liftsBy) : nil
     }
 }
 

@@ -1,0 +1,32 @@
+# Runs the unit tests on every push to main and every pull request. The snapshot tests are skipped: their
+# references are recorded on the maintainer's Mac and rendering differs between macOS versions.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use the newest Xcode on the runner
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          "$xcode/Contents/Developer/usr/bin/xcodebuild" -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Unit tests
+        env:
+          TEST_RUNNER_RESET_SKIP_SNAPSHOTS: "1"
+        run: ./scripts/test.sh
