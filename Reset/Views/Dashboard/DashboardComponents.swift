@@ -83,7 +83,11 @@ struct WindowArc: View {
 
     var body: some View {
         Canvas { ctx, size in
-            let r = min(size.width / 2 - 6, size.height - 8)
+            // The "now" dot is sized for the hero; in the sidebar's 22-point arc it covered the whole arc, so small
+            // arcs get a dot just wider than their line and room for it.
+            let small = min(size.width / 2, size.height) < 30
+            let dot: CGFloat = small ? lineWidth * 1.4 : 6, halo: CGFloat = small ? lineWidth * 2.2 : 11
+            let r = small ? min(size.width / 2 - halo, size.height - halo - 2) : min(size.width / 2 - 6, size.height - 8)
             let c = CGPoint(x: size.width / 2, y: size.height - 2)
             func pt(_ t: Double) -> CGPoint { CGPoint(x: c.x - r * cos(.pi * t), y: c.y - r * sin(.pi * t)) }
             var track = Path()
@@ -95,8 +99,8 @@ struct WindowArc: View {
             lit.addArc(center: c, radius: r, startAngle: .degrees(180), endAngle: .degrees(180 + 180 * p), clockwise: false)
             ctx.stroke(lit, with: .color(color), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
             let d = pt(p)
-            ctx.fill(Path(ellipseIn: CGRect(x: d.x - 11, y: d.y - 11, width: 22, height: 22)), with: .color(color.opacity(0.25)))
-            ctx.fill(Path(ellipseIn: CGRect(x: d.x - 6, y: d.y - 6, width: 12, height: 12)), with: .color(.white))
+            ctx.fill(Path(ellipseIn: CGRect(x: d.x - halo, y: d.y - halo, width: halo * 2, height: halo * 2)), with: .color(color.opacity(0.25)))
+            ctx.fill(Path(ellipseIn: CGRect(x: d.x - dot, y: d.y - dot, width: dot * 2, height: dot * 2)), with: .color(.white))
         }
     }
 }

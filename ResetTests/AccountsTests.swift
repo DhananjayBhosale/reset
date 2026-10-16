@@ -72,6 +72,17 @@ final class AccountsTests: XCTestCase {
         XCTAssertNil(PlanUsageLog.weeklyHit(org: "pro", now: now, url: try planLog([(10, 0), (5, 64)])))
     }
 
+    func testPlanPriceFollowsTheChosenAccount() {
+        let ids = ["claude", "claude-6ac79bdb"], others = ["claude-6ac79bdb": 20.0]
+        XCTAssertEqual(UsageStore.monthlyPlan(main: 30, others: others, accounts: ids, account: "claude"), 30, "Team's own seat")
+        XCTAssertEqual(UsageStore.monthlyPlan(main: 30, others: others, accounts: ids, account: "claude-6ac79bdb"), 20, "Pro's own plan")
+        XCTAssertEqual(UsageStore.monthlyPlan(main: 30, others: others, accounts: ids, account: nil), 50, "All pays for both")
+        XCTAssertEqual(UsageStore.monthlyPlan(main: 30, others: others, accounts: ids, account: "claude-gone"), 50, "a vanished account means All")
+        XCTAssertEqual(UsageStore.monthlyPlan(main: 30, others: [:], accounts: ids, account: "claude-6ac79bdb"), 0, "not set yet: no multiple")
+        XCTAssertEqual(UsageStore.monthlyPlan(main: 20, others: others, accounts: ["claude"], account: "claude-6ac79bdb"), 20,
+                       "one account: the one price, as before")
+    }
+
     func testNames() {
         XCTAssertEqual(ClaudeSource.planLabel("team"), "Team")
         XCTAssertEqual(ClaudeSource.planLabel("max"), "Max")

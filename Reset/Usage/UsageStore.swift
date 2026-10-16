@@ -87,7 +87,13 @@ final class UsageStore {
     var selectedSession: String?
     /// Set from the menu's Share button; the dashboard opens the share sheet when it sees it.
     var shareRequested = false
+    /// What the main account's plan costs per month (the only price before accounts were told apart, so a price
+    /// set back then stays with it).
     var planMonthlyUSD: Double { didSet { UserDefaults.standard.set(planMonthlyUSD, forKey: "planMonthlyUSD") } }
+    /// Other accounts' monthly prices, by status id ("claude-<org>").
+    var otherPlansUSD: [String: Double] = UserDefaults.standard.dictionary(forKey: "planMonthlyByAccount") as? [String: Double] ?? [:] {
+        didSet { UserDefaults.standard.set(otherPlansUSD, forKey: "planMonthlyByAccount") }
+    }
 
     private let scanner = ClaudeUsageScanner()
     private let queue = DispatchQueue(label: "reset.usage", qos: .utility)
@@ -187,8 +193,31 @@ final class UsageStore {
 
     var totalCost: Double { inRange.reduce(0) { $0 + $1.cost } }
 
+    func planMonthly(for id: String) -> Double { id == "claude" ? planMonthlyUSD : otherPlansUSD[id] ?? 0 }
+
+    func setPlanMonthly(_ price: Double, for id: String) {
+        if id == "claude" { planMonthlyUSD = price } else { otherPlansUSD[id] = price }
+    }
+
+    /// Every account's plans together, for the widgets and menu, which always count every account.
+    var totalPlanMonthly: Double {
+        Self.monthlyPlan(main: planMonthlyUSD, others: otherPlansUSD, accounts: accounts.map(\.id), account: nil)
+    }
+
+    /// The monthly price that matches the calls being counted: the chosen account's plan, or all of them added up.
+    /// One price for every account compared Team's usage with a Pro price, and both accounts' usage with one plan.
+    static func monthlyPlan(main: Double, others: [String: Double], accounts: [String], account: String?) -> Double {
+        guard accounts.count > 1 else { return main }
+        func price(_ id: String) -> Double { id == "claude" ? main : others[id] ?? 0 }
+        // Like `scope`, an account that's no longer listed means all of them.
+        if let a = account, accounts.contains(a) { return price(a) }
+        return accounts.reduce(0) { $0 + price($1) }
+    }
+
     /// The plan price used for value maths; demo mode uses its own so screenshots never show the real one.
-    var effectivePlan: Double { Demo.isOn ? 100 : planMonthlyUSD }
+    var effectivePlan: Double {
+        Demo.isOn ? 100 : Self.monthlyPlan(main: planMonthlyUSD, others: otherPlansUSD, accounts: accounts.map(\.id), account: account)
+    }
     var planCostForRange: Double { effectivePlan * range.days(now: Date()) / 30 }
 
     var valueMultiple: Double? {

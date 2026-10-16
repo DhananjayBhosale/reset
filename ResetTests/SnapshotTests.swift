@@ -46,6 +46,16 @@ final class SnapshotTests: XCTestCase {
                            signedOut: true, budget: over, budgetUsed: 64), "hero-signed-out-over-budget", width: 700)
     }
 
+    func testSidebarArcs() throws {
+        // At the sidebar's 22×13 the hero-sized "now" dot once covered the whole arc.
+        let arcs = HStack(spacing: 12) {
+            ForEach([0.0, 0.07, 0.5, 0.95], id: \.self) { p in
+                WindowArc(progress: p, color: Theme.color(for: "claude"), lineWidth: 1.6).frame(width: 22, height: 13)
+            }
+        }.padding(6).background(Color.black)
+        try check(arcs, "sidebar-arcs")
+    }
+
     // MARK: Menu bar pill
 
     func testMenuBarPills() throws {

@@ -431,7 +431,7 @@ final class Store {
         out["updater"] = ["automatic": updater.automatic, "lastChecked": d(updater.lastChecked), "available": updater.available?.version ?? NSNull(),
                           "error": updater.lastError ?? NSNull(), "current": Updater.current]
         out["usage"] = ["calls": usage.calls.count, "lastScan": d(usage.lastScan), "projects": usage.projects.count,
-                        "planMonthly": usage.planMonthlyUSD]
+                        "planMonthly": usage.planMonthlyUSD, "planTotal": usage.totalPlanMonthly]
         out["autoStartLog"] = kickLog.suffix(5).map { ["id": $0.id, "time": iso.string(from: $0.time), "kind": $0.kind, "summary": $0.summary] }
         out["autoStartNeedsSignIn"] = autoStartNeedsSignIn
         out["activity"] = Array(log.prefix(10))
@@ -617,7 +617,7 @@ final class Store {
         let week = usage.calls.filter { $0.time >= Date().addingTimeInterval(-7 * 86400) }
         let weekCost = week.reduce(0) { $0 + $1.cost }
         let cr = week.reduce(0) { $0 + $1.cacheRead }, rest = week.reduce(0) { $0 + $1.input + $1.cw5 + $1.cw1h }
-        let plan = usage.planMonthlyUSD * 7 / 30
+        let plan = usage.totalPlanMonthly * 7 / 30
         let providers = visible.filter { MascotArt.providers.contains($0.id) }.map { s -> WidgetSnapshot.Provider in
             var available = true
             if case .unavailable = s.state { available = false }
@@ -631,7 +631,7 @@ final class Store {
         let month = usage.calls.filter { $0.time >= Date().addingTimeInterval(-30 * 86400) }
         let monthCost = month.reduce(0) { $0 + $1.cost }
         snap.monthCost = monthCost
-        snap.monthMultiple = usage.planMonthlyUSD > 0 ? monthCost / usage.planMonthlyUSD : nil
+        snap.monthMultiple = usage.totalPlanMonthly > 0 ? monthCost / usage.totalPlanMonthly : nil
         snap.monthCacheSaved = month.reduce(0) { acc, c in
             guard let p = Pricing.claude(c.model) else { return acc }
             return acc + Double(c.cacheRead) * (p.input - p.cacheRead) / 1_000_000

@@ -2,6 +2,13 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.14 — each account's own plan
+
+- A plan price per Claude account: the value multiple compares Team's usage with Team's price and Pro's with Pro's, and All adds them up. A price set before stays with the account Claude Code is signed in to.
+- A used-up weekly limit (read from the Claude desktop app) shows until the latest it can lift, worked out from when it last reset, instead of a note beside "ready".
+- The dashboard's Providers list shows a second Claude account, and its small arcs no longer draw as a blob.
+- The unit tests run on GitHub for every push and pull request.
+
 ## 0.3.13 — the menu bar follows the account you're using
 
 - With two Claude accounts, the menu bar showed a green "Pro ready" just because the second account was unused, hiding the signed-in account's countdown, what's left and the run-out warning. While that account's window runs, the menu bar now shows only it.

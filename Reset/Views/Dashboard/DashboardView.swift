@@ -136,7 +136,8 @@ struct DashboardView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Providers").font(Dash.label).foregroundStyle(Dash.dim).padding(.horizontal, 10).padding(.bottom, 4)
-            ForEach(store.visible.filter { MascotArt.providers.contains($0.id) }) { s in
+            // Second Claude accounts ("claude-<org>") too: they share Claude's art, and the exact-id check hid them.
+            ForEach(store.visible.filter { MascotArt.providers.contains($0.id) || $0.id.hasPrefix("claude-") }) { s in
                 HStack(spacing: 10) {
                     WindowArc(progress: arcProgress(s), color: Theme.color(for: s.id), lineWidth: 1.6)
                         .accessibilityHidden(true)
@@ -296,16 +297,31 @@ struct DashboardView: View {
         .popover(isPresented: $editingPlan, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("What you pay per month").font(.system(size: 13, weight: .medium))
-                HStack {
-                    Text("$")
-                    TextField("150", value: $usage.planMonthlyUSD, format: .number).frame(width: 90)
-                        .onSubmit { editingPlan = false }
+                // One field per account shown: the chosen one, or every account under All, which adds them up.
+                ForEach(planAccounts, id: \.id) { a in
+                    HStack {
+                        if planAccounts.count > 1 || usage.accounts.count > 1 {
+                            Text(a.name).frame(width: 110, alignment: .leading).foregroundStyle(.secondary)
+                        }
+                        Text("$")
+                        TextField("20", value: Binding(get: { usage.planMonthly(for: a.id) }, set: { usage.setPlanMonthly($0, for: a.id) }),
+                                  format: .number).frame(width: 90)
+                            .onSubmit { editingPlan = false }
+                    }
                 }
-                Text("Add up all your Claude plans. Used only on this Mac to work out the multiple.")
-                    .font(.caption).foregroundStyle(.secondary).frame(width: 220, alignment: .leading)
+                Text(usage.accounts.count > 1 ? "Each account's own plan. All adds them up. Used only on this Mac to work out the multiple."
+                                              : "Your Claude plan's price. Used only on this Mac to work out the multiple.")
+                    .font(.caption).foregroundStyle(.secondary).frame(width: 240, alignment: .leading)
             }
             .padding(14)
         }
+    }
+
+    /// The accounts whose plan price the popover edits.
+    private var planAccounts: [(id: String, name: String)] {
+        guard usage.accounts.count > 1 else { return [("claude", "Claude")] }
+        if let a = usage.account, let entry = usage.accounts.first(where: { $0.id == a }) { return [(entry.id, entry.name)] }
+        return usage.accounts.map { ($0.id, $0.name) }
     }
 
     private var rangePhrase: String {
