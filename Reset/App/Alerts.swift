@@ -10,22 +10,42 @@ final class Alerts {
     private let prefix = "reset2-"
     private let legacyPrefix = "reset-"
 
+    /// Buttons on notifications; AppDelegate acts on them. Without them a "signed out" alert asked you to go and
+    /// find a button, and a click on any banner opened nothing (Reset has no Dock icon).
+    enum Action { static let signIn = "reset.signin", start = "reset.start" }
+    enum Category { static let signIn = "reset.cat.signin", start = "reset.cat.start" }
+
     func requestPermission() {
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Category.signIn,
+                                   actions: [UNNotificationAction(identifier: Action.signIn, title: "Sign in", options: [.foreground])],
+                                   intentIdentifiers: []),
+            UNNotificationCategory(identifier: Category.start,
+                                   actions: [UNNotificationAction(identifier: Action.start, title: "Start now", options: [])],
+                                   intentIdentifiers: []),
+        ])
     }
 
     /// Minute precision, so a reset time that wobbles by a second keeps the same identity.
     static func minuteKey(_ d: Date) -> Int { Int((d.timeIntervalSince1970 / 60).rounded()) }
 
-    func sync(_ windows: [WindowStatus], leadMinutes: Int) {
+    /// `autoStarting`: ids auto-start will start at the reset. `startable`: ids Reset can start on request.
+    func sync(_ windows: [WindowStatus], leadMinutes: Int, autoStarting: Set<String> = [], startable: Set<String> = []) {
         let now = Date()
         var wanted: [String: UNNotificationRequest] = [:]
         for w in windows {
             guard let at = w.resetsAt, at > now else { continue }
-            let id = "\(prefix)\(w.id)-\(Self.minuteKey(at))"
+            let auto = autoStarting.contains(w.id)
+            // The auto-start mark is part of the id, so switching auto-start replaces the queued wording.
+            let id = "\(prefix)\(w.id)-\(Self.minuteKey(at))\(auto ? "-auto" : "")"
+            // "Send a message to start it" was wrong when auto-start was about to do exactly that.
             let body = w.blockedUntil.map { "Session window is fresh, but the \(w.secondary?.label.lowercased() ?? "longer") limit lasts until \(Fmt.when($0))." }
-                ?? "A fresh window is ready. Send a message to start it."
-            wanted[id] = request(id: id, title: "\(w.name) has reset", body: body, at: at)
+                ?? (auto ? "A fresh window is ready. Auto-start will open it in a couple of minutes."
+                         : "A fresh window is ready. Send a message to start it.")
+            let canStart = !auto && w.blockedUntil == nil && startable.contains(w.id)
+            wanted[id] = request(id: id, title: "\(w.name) has reset", body: body, at: at,
+                                 category: canStart ? Category.start : nil, provider: w.id)
             if leadMinutes > 0 {
                 let early = at.addingTimeInterval(TimeInterval(-leadMinutes * 60))
                 if early > now {
@@ -45,11 +65,14 @@ final class Alerts {
         }
     }
 
-    private func request(id: String, title: String, body: String, at: Date) -> UNNotificationRequest {
+    private func request(id: String, title: String, body: String, at: Date, category: String? = nil,
+                         provider: String? = nil) -> UNNotificationRequest {
         let c = UNMutableNotificationContent()
         c.title = title
         c.body = body
         c.sound = .default
+        if let category { c.categoryIdentifier = category }
+        if let provider { c.userInfo = ["id": provider] }
         // A calendar trigger fires at the wall-clock time, including after the Mac wakes from sleep.
         // An interval trigger counts elapsed time, which drifts across sleep and reports the wrong time.
         var comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: at)
@@ -59,9 +82,10 @@ final class Alerts {
     }
 
     /// `id` keeps a repeat of the same alert (say, a second auto-start failure) replacing the first instead of stacking.
-    func notifyNow(title: String, body: String, id: String? = nil) {
+    func notifyNow(title: String, body: String, id: String? = nil, category: String? = nil) {
         let c = UNMutableNotificationContent()
         c.title = title; c.body = body; c.sound = .default
+        if let category { c.categoryIdentifier = category }
         center.add(UNNotificationRequest(identifier: prefix + (id ?? "forecast-\(Int(Date().timeIntervalSince1970))"), content: c,
                                          trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)))
     }

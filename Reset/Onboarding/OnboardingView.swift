@@ -49,7 +49,11 @@ struct OnboardingView: View {
         .environment(\.colorScheme, .dark)
         .onAppear {
             detected = InstalledTools.detect()
-            chosen = detected.isEmpty ? ["claude"] : detected
+            // Run again from Settings, start from what's on now: starting from detection switched off any tool the
+            // user had turned on by hand, and its auto-start with it, as soon as they pressed Continue.
+            let on = Set(names.map(\.0).filter { store.prefs(for: $0).enabled })
+            if UserDefaults.standard.bool(forKey: "onboarded"), !on.isEmpty { chosen = on }
+            else { chosen = detected.isEmpty ? ["claude"] : detected }
         }
     }
 

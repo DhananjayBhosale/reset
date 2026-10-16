@@ -84,7 +84,12 @@ struct MenuView: View {
         if let r = h.resetsAt {
             // With the sign-in banner showing, the reason is already on screen; "estimated" alone is enough here.
             let note = store.liveNeedsSignIn && h.id == "claude" ? (h.isEstimate ? "estimated" : nil) : store.estimateNote(for: h)
-            return "Resets \(Fmt.when(r, now: store.now))" + (note.map { " · " + $0 } ?? "")
+            var line = "Resets \(Fmt.when(r, now: store.now))" + (note.map { " · " + $0 } ?? "")
+            if let asOf = h.usageAsOf, h.usedPercent != nil {
+                let m = Int(store.now.timeIntervalSince(asOf) / 60)
+                if m >= 3 { line += m < 60 ? " · updated \(m) min ago" : " · updated \(Fmt.when(asOf, now: store.now))" }
+            }
+            return line
         }
         if case .unavailable(let why) = h.state { return why }
         return "Send a message to start the clock"
@@ -99,7 +104,8 @@ struct MenuView: View {
                 Text(detail).font(.system(size: 11)).foregroundStyle(Theme.dim)
             }
             Spacer()
-            Button(store.signingIn ? "Waiting…" : "Fix") { store.fixClaudeSignIn() }
+            // "Sign in", as the notifications and Settings call it.
+            Button(store.signingIn ? "Waiting…" : "Sign in") { store.fixClaudeSignIn() }
                 .buttonStyle(PillButtonStyle(tint: Color(hex: 0xFFB13D)))
         }
         .padding(10)
@@ -120,9 +126,10 @@ struct MenuView: View {
     }
 
     @ViewBuilder private func notices(for h: WindowStatus) -> some View {
-        if h.id == "claude", let out = store.forecast.runsOutAt {
+        if h.id == "claude", let out = store.runsOut {
             Label("At this pace you run out around \(Fmt.clock.string(from: out))", systemImage: "flame")
                 .font(.system(size: 11, weight: .medium)).foregroundStyle(Color(hex: 0xFF8A5C))
+                .help((store.forecast.basis.map { $0 + ". " } ?? "") + "Slow down and the warning clears.")
         }
         if h.id == "claude", let b = store.budget { budgetNotice(b) }
         if let sec = h.secondary {
@@ -179,7 +186,7 @@ struct MenuView: View {
             }
             WindowBarcode(windows: wins, days: 1, showLabels: false, rowHeight: 14).frame(height: 14)
             HStack {
-                ForEach(["12 AM", "6 AM", "12 PM", "6 PM", ""], id: \.self) { t in
+                ForEach([0, 6, 12, 18].map(Fmt.hourLabel) + [""], id: \.self) { t in
                     Text(t).font(.system(size: 9)).foregroundStyle(Theme.dim.opacity(0.7))
                     if !t.isEmpty { Spacer() }
                 }
@@ -192,10 +199,12 @@ struct MenuView: View {
     private var toolbar: some View {
         HStack(spacing: 4) {
             ToolButton(icon: "square.grid.2x2", label: "Dashboard") { open("dashboard") }
+                .keyboardShortcut("d")
             ToolButton(icon: "square.and.arrow.up", label: "Share") { store.usage.shareRequested = true; open("dashboard") }
             ToolButton(icon: store.mascots.enabled ? "pawprint.fill" : "pawprint", label: "Pets",
                        active: store.mascots.enabled) { store.mascots.enabled.toggle() }
             ToolButton(icon: "gearshape", label: "Settings") { open("settings") }
+                .keyboardShortcut(",")
             Spacer()
             Menu {
                 if claude != nil {
@@ -208,8 +217,10 @@ struct MenuView: View {
                     Button("I started \(s.name)") { store.startCustom(s.id) }
                 }
                 Button("Rescan now") { store.refresh(); store.usage.refresh() }
+                    .keyboardShortcut("r")
                 Divider()
                 Button("Quit Reset") { NSApp.terminate(nil) }
+                    .keyboardShortcut("q")
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).frame(width: 30, height: 26)
             }

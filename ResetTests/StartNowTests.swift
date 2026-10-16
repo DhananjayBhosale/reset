@@ -27,6 +27,16 @@ final class StartNowTests: XCTestCase {
         XCTAssertFalse(Store.shouldStartFromWidget(nil, command: cmd, kicking: false, demo: false, now: now))
     }
 
+    func testRefusalsSayWhy() {
+        let cmd = #"claude -p "hi""#
+        XCTAssertEqual(Store.widgetStartBlocker(claude(.ready), command: "", kicking: false, demo: false, now: now),
+                       "no start command is set (Settings → Advanced)", "not \"already starting\"")
+        XCTAssertTrue(Store.widgetStartBlocker(claude(.ready, blockedFor: 3600), command: cmd, kicking: false, demo: false, now: now)?
+                        .hasPrefix("the weekly limit is used up") == true)
+        XCTAssertEqual(Store.widgetStartBlocker(claude(.active(resetsAt: now.addingTimeInterval(60))), command: cmd, kicking: false, demo: false, now: now),
+                       "a window is already running")
+    }
+
     func testRequestPostedByTheWidgetReachesTheListener() {
         // A made-up provider name, so the app's real listener (for "claude") never hears it.
         let provider = "test-\(UUID().uuidString)"

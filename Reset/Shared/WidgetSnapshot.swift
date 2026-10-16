@@ -79,4 +79,21 @@ struct WidgetSnapshot: Codable {
     }
 
     var claude: Provider? { providers.first { $0.id == "claude" } }
+
+    /// Today's and yesterday's running totals as seen on `date`. The stored series describe the day the snapshot
+    /// was written, and a widget keeps the same snapshot for up to an hour, so just after midnight "today" showed
+    /// all of yesterday. A snapshot from yesterday is yesterday's curve and nothing yet today.
+    func dayCurves(on date: Date, calendar: Calendar = .current) -> (today: [Double], yesterday: [Double]) {
+        let zero = Array(repeating: 0.0, count: 24)
+        let t = todayCumulative ?? zero, y = yesterdayCumulative ?? zero
+        if calendar.isDate(updated, inSameDayAs: date) { return (t, y) }
+        if let next = calendar.date(byAdding: .day, value: 1, to: updated), calendar.isDate(next, inSameDayAs: date) { return (zero, t) }
+        return (zero, zero)
+    }
+
+    /// This month's days and limit days as seen on `date`: none yet once the snapshot is from an earlier month.
+    func month(on date: Date, calendar: Calendar = .current) -> (days: [Double], limitDays: [Int]) {
+        guard calendar.isDate(updated, equalTo: date, toGranularity: .month) else { return ([], []) }
+        return (monthDays ?? [], limitDays ?? [])
+    }
 }

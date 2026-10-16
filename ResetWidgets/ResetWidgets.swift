@@ -33,6 +33,9 @@ struct Provider: TimelineProvider {
         for p in snap?.providers ?? [] { if let r = p.resetsAt, r > now, r < now.addingTimeInterval(6 * 3600) { dates.append(r.addingTimeInterval(1)) } }
         // One entry a minute for the next hour, so drawn countdowns (LED dots, gauges) stay current.
         dates += stride(from: 1.0, through: 60, by: 1).map { now.addingTimeInterval($0 * 60) }
+        // And one just after midnight, when today's totals start again.
+        if let midnight = Calendar.current.nextDate(after: now, matching: DateComponents(hour: 0, minute: 0, second: 5), matchingPolicy: .nextTime),
+           midnight < now.addingTimeInterval(3600) { dates.append(midnight) }
         let entries = Set(dates).sorted().map { Entry(date: $0, snap: snap) }
         completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(3600))))
     }

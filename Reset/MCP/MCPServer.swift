@@ -35,7 +35,7 @@ enum MCPServer {
         case "initialize":
             let requested = params?["protocolVersion"] as? String ?? "2025-06-18"
             return result(["protocolVersion": requested, "capabilities": ["tools": [String: Any]()],
-                           "serverInfo": ["name": "reset", "version": "0.3.14"]])
+                           "serverInfo": ["name": "reset", "version": "0.3.15"]])
         case "tools/list":
             return result(["tools": tools])
         case "tools/call":
@@ -157,13 +157,16 @@ enum MCPServer {
             // An agent pacing itself should know when these numbers are a guess, and why.
             claude["estimated"] = c.estimate != nil
             if let e = c.estimate { claude["estimate_note"] = e }
-            if let o = snap.claudeRunsOutAt, o > now {
+            // Only a run-out that's still ahead and before this window's reset; a stale one isn't a warning.
+            let runsOut = snap.claudeRunsOutAt.flatMap { o in !ready && o > now && c.resetsAt.map { o < $0 } == true ? o : nil }
+            if let o = runsOut {
                 claude["projected_run_out_local"] = local.string(from: o)
                 claude["minutes_until_run_out"] = Int(o.timeIntervalSince(now) / 60)
             }
             out["claude"] = claude
             // Plain-language advice an agent can act on.
-            let left = ready ? 100.0 : (c.used.map { 100 - $0 } ?? 100)
+            // Unknown usage is not "plenty left": with live usage off, that told agents to go ahead with large work.
+            let left: Double? = ready ? 100 : c.used.map { 100 - $0 }
             let budgetStatus = budget?.status(used: used)
             if let b = c.blockedUntil, b > now {
                 // Nothing can run at all, so this outranks any budget.
@@ -171,11 +174,14 @@ enum MCPServer {
             } else if let budget, budgetStatus == .over {
                 // Over budget is the most specific instruction there is: it names the task and the model to switch to.
                 out["advice"] = budget.advice(used: used)
-            } else if snap.claudeRunsOutAt != nil || left < 15 {
-                out["advice"] = "Window nearly exhausted. Finish the current step, prefer smaller models for subagents, avoid broad fan-outs until the reset."
+            } else if runsOut != nil || (left ?? 100) < 15 {
+                let when = runsOut.map { " At this pace it runs out around \(local.string(from: $0)), before the reset." } ?? ""
+                out["advice"] = "Window nearly exhausted.\(when) Finish the current step, prefer smaller models for subagents, avoid broad fan-outs until the reset."
             } else if let budget, budgetStatus == .wrapUp {
                 out["advice"] = budget.advice(used: used)
-            } else if left < 50 {
+            } else if left == nil {
+                out["advice"] = "How much of the window is left is unknown (see estimate_note). Pace conservatively: keep subagents lean and batch tool calls."
+            } else if let left, left < 50 {
                 out["advice"] = "Under half the window left. Keep subagents lean and batch tool calls."
             } else {
                 out["advice"] = "Plenty of window left."

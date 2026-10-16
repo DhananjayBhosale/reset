@@ -65,19 +65,37 @@ final class Forecast {
     }
 
     /// Least-squares slope over the last 45 minutes, in percent per second.
-    private func project(now: Date) -> Date? {
-        guard readings.count >= 3, let end = windowEnd, let first = readings.first,
-              now.timeIntervalSince(first.t) >= 10 * 60 else { return nil }
+    private var slope: Double? {
+        guard readings.count >= 3, let first = readings.first else { return nil }
         let xs = readings.map { $0.t.timeIntervalSince(first.t) }, ys = readings.map(\.used)
         let n = Double(xs.count), mx = xs.reduce(0, +) / n, my = ys.reduce(0, +) / n
         let num = zip(xs, ys).reduce(0) { $0 + ($1.0 - mx) * ($1.1 - my) }
         let den = xs.reduce(0) { $0 + ($1 - mx) * ($1 - mx) }
-        guard den > 0 else { return nil }
-        let slope = num / den
-        guard slope > 0, let current = ys.last, current < 100 else { return nil }
+        return den > 0 ? num / den : nil
+    }
+
+    /// What the projection is based on, for a tooltip: "about 18% an hour over the last 40 minutes".
+    var basis: String? {
+        guard let s = slope, s > 0, let first = readings.first, let last = readings.last else { return nil }
+        let minutes = Int(last.t.timeIntervalSince(first.t) / 60)
+        return "About \(Int((s * 3600).rounded()))% of the window an hour over the last \(minutes) minutes"
+    }
+
+    private func project(now: Date) -> Date? {
+        guard let end = windowEnd, let first = readings.first, now.timeIntervalSince(first.t) >= 10 * 60,
+              let slope, slope > 0, let current = readings.last?.used, current < 100 else { return nil }
         let at = now.addingTimeInterval((100 - current) / slope)
         // Only worth saying if it lands meaningfully before the reset.
         return at < end.addingTimeInterval(-5 * 60) ? at : nil
+    }
+
+    /// The run-out time only while it still means something: ahead of now, before this window's reset, and from
+    /// readings that are still arriving. `runsOutAt` is only recomputed when a reading comes in, so once live usage
+    /// paused (signed out, switched off, a failed check) the menu, status line and widgets kept showing a frozen time.
+    func current(now: Date, resetsAt: Date?) -> Date? {
+        guard let out = runsOutAt, out > now, let reset = resetsAt, out < reset,
+              let last = readings.last, now.timeIntervalSince(last.t) < 15 * 60 else { return nil }
+        return out
     }
 
     /// True once per window, the first time a run-out before the reset is projected.

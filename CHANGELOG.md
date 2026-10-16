@@ -2,6 +2,17 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.15 — polish
+
+- The run-out warning only shows while it's still ahead and live readings are arriving; it no longer freezes on an old time.
+- Clicking a notification opens the dashboard. Signed-out alerts have a Sign in button, reset alerts a Start now button, and they say when auto-start will open the window for you.
+- Times follow your Mac's 12/24-hour setting.
+- The dashboard's main card follows the All / Team / Pro switch.
+- Keyboard shortcuts: ⌘D dashboard, ⌘, Settings, ⌘R rescan, ⌘Q quit, ⌘1–4 for the dashboard's range.
+- Tooltips explain the value multiple, cache savings and the pace behind the run-out warning; the menu says how old a live reading is.
+- Settings warns when macOS has notifications turned off for Reset.
+- Fixes: the MCP server no longer says "Plenty of window left" when usage is unknown; Run setup again keeps your tools; the session detail no longer goes blank; the week widget counts 7 days; Today and Calendar widgets start fresh at midnight; an empty token mix is grey.
+
 ## 0.3.14 — each account's own plan
 
 - A plan price per Claude account: the value multiple compares Team's usage with Team's price and Pro's with Pro's, and All adds them up. A price set before stays with the account Claude Code is signed in to.

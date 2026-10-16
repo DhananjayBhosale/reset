@@ -195,10 +195,19 @@ final class Store {
     /// A tracked provider whose longer (weekly) limit is used up, which the menu bar shows ahead of everything.
     var blockedForBar: WindowStatus? { MenuBarGlance.pick(barCandidates, now: now).blocked }
 
+    /// When Claude's window runs out at today's pace, if that's still ahead and before its reset (see Forecast.current).
+    var runsOut: Date? {
+        guard liveClaudeEnabled else { return nil }
+        return forecast.current(now: Date(), resetsAt: statuses.first { $0.id == "claude" }?.resetsAt)
+    }
+
+    /// A window to bring up ("dashboard"), set from outside any view (a notification click); MenuBarLabel opens it.
+    var openRequest: String?
+
     /// What the menu bar shows right now (see MenuBarGlance).
     var glance: MenuBarGlance? {
         let p = MenuBarGlance.pick(barCandidates, now: now)
-        return MenuBarGlance.make(ready: p.ready, soonest: p.soonest, blocked: p.blocked, runsOutAt: forecast.runsOutAt,
+        return MenuBarGlance.make(ready: p.ready, soonest: p.soonest, blocked: p.blocked, runsOutAt: runsOut,
                                   signedOut: liveNeedsSignIn, now: now)
     }
 
@@ -308,7 +317,9 @@ final class Store {
 
     func syncAlerts() {
         let targets = visible.filter { prefs(for: $0.id).alert }
-        alerts.sync(targets, leadMinutes: leadMinutes)
+        let startable = Set(visible.filter { $0.canAutoStart && !(commands[$0.id] ?? "").isEmpty }.map(\.id))
+        let autoStarting = startable.filter { prefs(for: $0).enabled && prefs(for: $0).autoStart }
+        alerts.sync(targets, leadMinutes: leadMinutes, autoStarting: autoStarting, startable: startable)
         alerts.syncPhone(targets, server: ntfyServer, topic: ntfyTopic, enabled: phoneEnabled, log: note)
     }
 
@@ -358,7 +369,7 @@ final class Store {
                     self.auto.kickDue[id] = nil
                     self.auto.pausedKick[id] = due.reset
                     self.warnAutoStart(id, title: "Auto-start couldn't start \(s.name)",
-                                       body: "Claude Code is signed out. Open Reset and press Sign in; the window starts right after.")
+                                       body: "Claude Code is signed out. Press Sign in; the window starts right after.", signIn: true)
                 default:
                     if var d = self.auto.kickDue[id] { d.attempts += 1; self.auto.kickDue[id] = d }
                 }
@@ -398,7 +409,7 @@ final class Store {
             parts.append(s)
         }
         if let b = c.blockedUntil, b > Date() { parts.append("weekly limit until \(Fmt.when(b))") }
-        if let out = forecast.runsOutAt { parts.append("runs out ~\(Fmt.clock.string(from: out))") }
+        if let out = runsOut { parts.append("runs out ~\(Fmt.clock.string(from: out))") }
         if let b = budget { parts.append(b.tag(used: budgetUsed)) }
         let today = usage.calls.filter { Calendar.current.isDateInToday($0.time) }.reduce(0) { $0 + $1.cost }
         if today > 0 { parts.append(String(format: "$%.0f today", today)) }
@@ -587,8 +598,8 @@ final class Store {
 
     /// Mac notification, plus a phone push when phone alerts are on, for an auto-start that needs you.
     /// One stable id per provider, so a second failure replaces the first.
-    private func warnAutoStart(_ id: String, title: String, body: String) {
-        alerts.notifyNow(title: title, body: body, id: "autostart-\(id)")
+    private func warnAutoStart(_ id: String, title: String, body: String, signIn: Bool = false) {
+        alerts.notifyNow(title: title, body: body, id: "autostart-\(id)", category: signIn ? Alerts.Category.signIn : nil)
         if phoneEnabled { alerts.pushNow(title: title, body: body, server: ntfyServer, topic: ntfyTopic, log: note) }
     }
 
@@ -624,7 +635,8 @@ final class Store {
             return .init(id: s.id, name: s.name, resetsAt: s.resetsAt, ready: s.state == .ready, available: available,
                          used: s.usedPercent, blockedUntil: s.blockedUntil, estimate: estimateNote(for: s))
         }
-        let windows = usage.windows(days: 5).map { WidgetSnapshot.Window(start: $0.start, end: $0.end, autoStart: $0.autoStart, hitLimit: $0.hitLimit) }
+        // 7 days: the week widget counts this week's windows from these (5 undercounted it); the barcode draws its own 5 rows.
+        let windows = usage.windows(days: 7).map { WidgetSnapshot.Window(start: $0.start, end: $0.end, autoStart: $0.autoStart, hitLimit: $0.hitLimit) }
         var snap = WidgetSnapshot(updated: .distantPast, look: look, providers: providers, windows: windows, weekCost: weekCost,
                                   weekMultiple: plan > 0 ? weekCost / plan : nil,
                                   cacheHit: cr + rest > 0 ? Double(cr) / Double(cr + rest) : 0)
@@ -672,7 +684,7 @@ final class Store {
         snap.projects = proj.sorted { $0.value > $1.value }.prefix(6).map { .init(name: $0.key, cost: ($0.value * 100).rounded() / 100) }
         let mdays = Self.monthBuckets(usage.calls, monthStart: monthStart, daysInMonth: daysInMonth, calendar: cal)
         snap.monthDays = mdays.map { ($0 * 100).rounded() / 100 }
-        snap.claudeRunsOutAt = forecast.runsOutAt
+        snap.claudeRunsOutAt = runsOut
         snap.startingAt = widgetStarting["claude"]
         snap.limitDays = Array(Set(usage.limitHits.filter { $0 >= monthStart }.map { cal.component(.day, from: $0) })).sorted()
 
@@ -742,24 +754,35 @@ final class Store {
     /// Any process on the Mac can post the request's name, so it only ever starts a window when one is
     /// actually waiting: at most one start per window, never a second while a window runs.
     static func shouldStartFromWidget(_ s: WindowStatus?, command: String?, kicking: Bool, demo: Bool, now: Date = Date()) -> Bool {
-        guard !demo, !kicking, let s, s.state == .ready, !(command ?? "").isEmpty else { return false }
-        if let b = s.blockedUntil, b > now { return false }
-        return true
+        widgetStartBlocker(s, command: command, kicking: kicking, demo: demo, now: now) == nil
     }
 
-    func startFromWidget(_ id: String) {
+    /// Why Start now can't start, in words for the Activity log; nil when it can. Every refusal used to be logged
+    /// as "already starting" or "a window is already running", even with no start command set.
+    static func widgetStartBlocker(_ s: WindowStatus?, command: String?, kicking: Bool, demo: Bool, now: Date = Date()) -> String? {
+        if demo { return "demo mode" }
+        guard let s else { return "Claude isn't being tracked" }
+        if kicking { return "already starting" }
+        if let b = s.blockedUntil, b > now { return "the weekly limit is used up until \(Fmt.when(b, now: now))" }
+        if s.state != .ready { return "a window is already running" }
+        if (command ?? "").isEmpty { return "no start command is set (Settings → Advanced)" }
+        return nil
+    }
+
+    /// `from` says where the press came from, for the Activity log.
+    func startFromWidget(_ id: String, from: String = "a widget") {
         let s = statuses.first { $0.id == id }
         guard network.isOnline else {
-            note("Start now from a widget: no network, try again once you're online")
+            note("Start now from \(from): no network, try again once you're online")
             return
         }
         // A marker older than a run's limit is left over from a start that never reported back; ignore it.
         let kicking = widgetStarting[id].map { Date().timeIntervalSince($0) < 240 } ?? false
-        guard Self.shouldStartFromWidget(s, command: commands[id], kicking: kicking, demo: Demo.isOn) else {
-            note("Start now from a widget ignored: \(s?.state == .ready ? "already starting" : "a window is already running")")
+        if let why = Self.widgetStartBlocker(s, command: commands[id], kicking: kicking, demo: Demo.isOn) {
+            note("Start now from \(from) ignored: \(why)")
             return
         }
-        note("Start now pressed in a widget")
+        note("Start now pressed in \(from)")
         widgetStarting[id] = Date()
         writeWidgetSnapshot()
         // A button press is worth one reload of its own, so "Starting…" shows at once.
@@ -775,7 +798,7 @@ final class Store {
             // A start you asked for gets the same record and sign-in handling as an automatic one.
             self.recordKick(id, outcome)
             if outcome == .signedOut {
-                self.warnAutoStart(id, title: "Couldn't start \(s.name)", body: "Claude Code is signed out. Press Sign in in Reset, then try again.")
+                self.warnAutoStart(id, title: "Couldn't start \(s.name)", body: "Claude Code is signed out. Press Sign in, then try again.", signIn: true)
             }
             self.refresh()
         }

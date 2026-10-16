@@ -227,6 +227,23 @@ final class MCPServerTests: XCTestCase {
         XCTAssertEqual((call("get_claude_usage").0["budget"] as? [String: Any])?["status"] as? String, "unknown")
     }
 
+    func testUnknownUsageIsNotPlentyLeft() {
+        snapshot = snap(used: nil)
+        XCTAssertTrue((call("get_claude_usage").0["advice"] as? String)?.contains("unknown") == true)
+    }
+
+    func testOnlyARunOutStillAheadAndBeforeTheResetWarns() {
+        var s = snap(used: 30)
+        s.claudeRunsOutAt = now.addingTimeInterval(-600)
+        snapshot = s
+        XCTAssertEqual(call("get_claude_usage").0["advice"] as? String, "Plenty of window left.", "a run-out already past says nothing")
+        s.claudeRunsOutAt = now.addingTimeInterval(3600)
+        snapshot = s
+        let (report, _) = call("get_claude_usage")
+        XCTAssertTrue((report["advice"] as? String)?.hasPrefix("Window nearly exhausted. At this pace") == true)
+        XCTAssertEqual((report["claude"] as? [String: Any])?["minutes_until_run_out"] as? Int, 60)
+    }
+
     func testInvalidSetBudgetIsAToolErrorAndWritesNothing() {
         let (report, isError) = call("set_budget", ["task": "t", "max_window_percent": 150])
         XCTAssertTrue(isError)

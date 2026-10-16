@@ -24,7 +24,8 @@ struct HeroCard: View {
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .top) {
-                        CardHeader(title: "Claude session window", subtitle: subtitle)
+                        CardHeader(title: c.map { $0.id == "claude" ? "Claude session window" : "\($0.name) session window" } ?? "Claude session window",
+                                   subtitle: subtitle)
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(end.map { Fmt.clock.string(from: $0) } ?? "--").font(Dash.num(15)).foregroundStyle(.white)

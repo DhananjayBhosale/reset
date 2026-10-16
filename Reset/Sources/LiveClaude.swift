@@ -249,7 +249,9 @@ final class LiveClaude {
         guard let snap = snapshot, now.timeIntervalSince(snap.fetchedAt) < 15 * 60 else { return }
         if let fh = snap.fiveHour {
             s.usedPercent = fh.percent
-            s.usageAsOf = nil
+            // A reading can be up to 15 minutes old (polling slows when idle or when asked to); past 3 minutes the
+            // menu says how old, rather than passing it off as current.
+            s.usageAsOf = now.timeIntervalSince(snap.fetchedAt) > 180 ? snap.fetchedAt : nil
             if let r = fh.resetsAt, r > now { s.state = .active(resetsAt: r) }
             else if fh.percent == 0 { s.state = .ready }
             s.isEstimate = false

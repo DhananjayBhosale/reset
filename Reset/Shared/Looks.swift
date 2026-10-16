@@ -128,7 +128,7 @@ struct LookCard: View {
 
 private func clock(_ d: Date?) -> String {
     guard let d else { return "--" }
-    let f = DateFormatter(); f.dateFormat = "h:mm a"; return f.string(from: d)
+    let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("jmm"); return f.string(from: d)
 }
 
 /// The bare percentage for big numbers; "~" marks it as time-based when there's no usage reading.

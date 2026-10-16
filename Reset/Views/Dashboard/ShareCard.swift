@@ -71,12 +71,12 @@ struct ShareSheet: View {
     private var model: ShareCardView.Model { Self.model(usage, mascot: showMascot) }
 
     static func model(_ usage: UsageStore, mascot showMascot: Bool) -> ShareCardView.Model {
-        let df = DateFormatter(); df.dateFormat = "MMMM yyyy"
         let title: String
         switch usage.range {
         case .today: title = "My AI day · " + DateFormatter.localizedString(from: Date(), dateStyle: .medium, timeStyle: .none)
         case .week: title = "My AI week"
-        case .month: title = "My AI month · " + df.string(from: Date())
+        // The last 30 days, not the calendar month its name was printed with.
+        case .month: title = "My last 30 days with AI"
         case .all: title = "My last \(Int(UsageStore.historyDays)) days with AI"
         }
         var line = AttributedString()

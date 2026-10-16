@@ -175,7 +175,7 @@ struct WindowBarcode: View {
             }
             if showLabels {
                 let y = size.height - 6
-                for (h, label) in [(0, "12 AM"), (6, "6 AM"), (12, "12 PM"), (18, "6 PM")] {
+                for (h, label) in [0, 6, 12, 18].map({ ($0, Fmt.hourLabel($0)) }) {
                     ctx.draw(Text(label).font(.system(size: 10)).foregroundColor(Dash.faint),
                              at: CGPoint(x: labelW + plotW * CGFloat(h) / 24, y: y), anchor: .leading)
                 }
@@ -197,7 +197,9 @@ struct TokenGrid: View {
                 cells += Array(repeating: c, count: k)
             }
             while cells.count > 100 { if let i = cells.firstIndex(of: Dash.blue) { cells.remove(at: i) } else { cells.removeLast() } }
-            while cells.count < 100 { cells.insert(Dash.blue, at: 0) }
+            // Topping up with blue rounds a real mix to 100; with no tokens at all it painted "100% cache read".
+            let empty = Color.white.opacity(0.06)
+            while cells.count < 100 { cells.insert(mix.total > 0 ? Dash.blue : empty, at: 0) }
             let cols = 20, gap: CGFloat = 3
             let side = (size.width - gap * CGFloat(cols - 1)) / CGFloat(cols)
             for (i, c) in cells.enumerated() {

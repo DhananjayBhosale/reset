@@ -72,3 +72,21 @@ final class FuseTests: XCTestCase {
         XCTAssertNotEqual(a, Store.widgetState(p, runsOutAt: nil), "the flag appearing or going away reloads")
     }
 }
+
+/// Widgets keep one snapshot for up to an hour, so day and month totals are read as of the entry's date.
+final class WidgetDayRolloverTests: XCTestCase {
+    func testAfterMidnightTodayStartsAgainAndYesterdayIsTheOldToday() {
+        let cal = Calendar.current
+        let evening = cal.date(bySettingHour: 23, minute: 50, second: 0, of: Date(timeIntervalSince1970: 1_772_442_000))!
+        var s = WidgetSnapshot(updated: evening, providers: [], windows: [], weekCost: 0, cacheHit: 0)
+        s.todayCumulative = Array(repeating: 9, count: 24); s.yesterdayCumulative = Array(repeating: 4, count: 24)
+        s.monthDays = [1, 2]; s.limitDays = [2]
+        XCTAssertEqual(s.dayCurves(on: evening.addingTimeInterval(300)).today.last, 9, "same day: as written")
+        let lateNight = evening.addingTimeInterval(20 * 60)
+        XCTAssertEqual(s.dayCurves(on: lateNight).today.last, 0)
+        XCTAssertEqual(s.dayCurves(on: lateNight).yesterday.last, 9)
+        XCTAssertEqual(s.dayCurves(on: evening.addingTimeInterval(2 * 86400)).yesterday.last, 0, "two days on: nothing known")
+        XCTAssertEqual(s.month(on: evening).days, [1, 2])
+        XCTAssertEqual(s.month(on: cal.date(byAdding: .month, value: 1, to: evening)!).days, [], "a new month starts empty")
+    }
+}

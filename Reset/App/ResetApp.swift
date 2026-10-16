@@ -38,6 +38,12 @@ struct MenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         label
+            .onChange(of: store.openRequest) { _, w in
+                guard let w else { return }
+                store.openRequest = nil
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: w)
+            }
             .task {
                 // `open -a Reset --args -openDashboard YES`, and the first launch after install, show the dashboard.
                 // `-openSettings YES` opens Settings, for checking it (with `-simulateLogFormat`, the format warning);
@@ -117,6 +123,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         Store.shared.start()
+    }
+
+    // A click on a banner opens the dashboard; its buttons sign in or start the window.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let id = response.notification.request.content.userInfo["id"] as? String ?? "claude"
+        let action = response.actionIdentifier
+        DispatchQueue.main.async {
+            let store = Store.shared
+            switch action {
+            case Alerts.Action.signIn: store.fixClaudeSignIn()
+            case Alerts.Action.start: store.startFromWidget(id, from: "a notification")
+            default: store.openRequest = "dashboard"
+            }
+        }
+        completionHandler()
     }
 
     // Show banners even when Reset's menu is open.

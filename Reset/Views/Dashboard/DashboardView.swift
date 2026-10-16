@@ -11,6 +11,13 @@ struct DashboardView: View {
 
     private var claude: WindowStatus? { store.statuses.first { $0.id == "claude" } }
 
+    /// The account the top of the dashboard is about: the one picked in the account switch, else the main one.
+    /// The cards below followed the switch while the countdown stayed on Team.
+    private var shown: WindowStatus? {
+        if let id = usage.account, let s = store.statuses.first(where: { $0.id == id }) { return s }
+        return claude
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
@@ -63,9 +70,10 @@ struct DashboardView: View {
     }
 
     private var nextWindowLine: String {
-        guard let c = claude else { return "" }
-        if c.state == .ready { return "A fresh Claude window is ready." }
-        if let r = c.resetsAt { return "Your next Claude window opens at \(Fmt.when(r, now: store.now))." }
+        guard let c = shown else { return "" }
+        let name = c.id == "claude" && usage.account == nil ? "Claude" : c.name
+        if c.state == .ready { return "A fresh \(name) window is ready." }
+        if let r = c.resetsAt { return "Your next \(name) window opens at \(Fmt.when(r, now: store.now))." }
         return ""
     }
 
@@ -98,7 +106,7 @@ struct DashboardView: View {
                 .background(Capsule().fill(Color.white.opacity(0.04)))
             }
             HStack(spacing: 2) {
-                ForEach(UsageRange.allCases) { r in
+                ForEach(Array(UsageRange.allCases.enumerated()), id: \.element) { i, r in
                     Button { usage.range = r } label: {
                         Text(r.rawValue).font(.system(size: 12))
                             .foregroundStyle(usage.range == r ? .white : Dash.dim)
@@ -107,6 +115,10 @@ struct DashboardView: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    // ⌘1…⌘4 switch range.
+                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")))
+                    .help("\(r.rawValue) (⌘\(i + 1))")
+                    .accessibilityAddTraits(usage.range == r ? .isSelected : [])
                 }
             }
             .padding(3)
@@ -173,7 +185,15 @@ struct DashboardView: View {
             }
             Spacer()
             if let t = usage.lastScan {
-                Text("Usage read \(Fmt.clock.string(from: t))").font(.system(size: 11)).foregroundStyle(Dash.faint).padding(.horizontal, 10)
+                // A button, ⌘R: the dashboard otherwise rescans every 5 minutes, and "Rescan now" lived only in the menu.
+                Button { store.refresh(); usage.refresh() } label: {
+                    Label("Usage read \(Fmt.clock.string(from: t))", systemImage: "arrow.clockwise")
+                        .font(.system(size: 11)).foregroundStyle(Dash.faint)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("r")
+                .help("Read usage again (⌘R)")
+                .padding(.horizontal, 10)
             }
         }
         .padding(.vertical, 18).padding(.horizontal, 10)
@@ -230,9 +250,11 @@ struct DashboardView: View {
     // MARK: Hero
 
     private var heroCard: some View {
-        HeroCard(status: claude, now: store.now, subtitle: heroSubtitle(claude), signedOut: store.liveNeedsSignIn,
-                 signingIn: store.signingIn, runsOutAt: store.forecast.runsOutAt, budget: store.budget, budgetUsed: store.budgetUsed,
-                 onSignIn: { store.fixClaudeSignIn() }, onClearBudget: { store.clearBudget() })
+        // Sign-in, the forecast and budgets belong to the account Claude Code is signed in to.
+        let main = shown?.id == "claude"
+        return HeroCard(status: shown, now: store.now, subtitle: heroSubtitle(shown), signedOut: main && store.liveNeedsSignIn,
+                        signingIn: store.signingIn, runsOutAt: main ? store.runsOut : nil, budget: main ? store.budget : nil,
+                        budgetUsed: store.budgetUsed, onSignIn: { store.fixClaudeSignIn() }, onClearBudget: { store.clearBudget() })
     }
 
     /// Where the numbers come from, and why they're a guess when they are, e.g. "Estimated from your activity ·
@@ -256,8 +278,11 @@ struct DashboardView: View {
                 Spacer(minLength: 0)
                 if let m = usage.valueMultiple {
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(String(format: m >= 100 ? "%.0f" : "%.1f", m)).font(Dash.hero(92)).foregroundStyle(.white)
-                        Text("×").font(Dash.hero(34)).foregroundStyle(Dash.dim)
+                        Group {
+                            Text(String(format: m >= 100 ? "%.0f" : "%.1f", m)).font(Dash.hero(92)).foregroundStyle(.white)
+                            Text("×").font(Dash.hero(34)).foregroundStyle(Dash.dim)
+                        }
+                        .help(multipleHelp)
                         Spacer()
                         planButton("Edit plan")
                     }
@@ -275,16 +300,27 @@ struct DashboardView: View {
                         Text("Cache saved you").font(Dash.label).foregroundStyle(Dash.dim)
                         Text(Dash.money(usage.cacheSaved)).font(Dash.num(24, .light)).foregroundStyle(Dash.green)
                     }
+                    .help("What these tokens would have cost read as fresh input, minus what reading them from Claude's cache cost, at API prices.")
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("Responses").font(Dash.label).foregroundStyle(Dash.dim)
                         Text(NumberFormatter.localizedString(from: NSNumber(value: usage.inRange.count), number: .decimal))
                             .font(Dash.num(24, .light)).foregroundStyle(.white)
                     }
+                    .help("Replies from Claude \(rangePhrase), counting each step of a tool-using turn.")
                 }
             }
             .frame(height: 312)
         }
+    }
+
+    /// How the multiple is worked out: the plan price is spread over the days in the range, so short ranges
+    /// (Today early in the morning) can read high.
+    private var multipleHelp: String {
+        let days = usage.range.days(now: Date())
+        let d = days < 1 ? String(format: "%.0f hours", days * 24) : String(format: days < 10 ? "%.1f days" : "%.0f days", days)
+        return "\(Dash.money(usage.totalCost)) of API value ÷ \(Dash.money(usage.planCostForRange)), which is \(d) of a "
+            + "\(Dash.money(usage.effectivePlan))/month plan."
     }
 
     private func planButton(_ title: String) -> some View {
@@ -324,12 +360,13 @@ struct DashboardView: View {
         return usage.accounts.map { ($0.id, $0.name) }
     }
 
+    /// The ranges are rolling ("7 days" back from now), so "this week" and "this month" described something else.
     private var rangePhrase: String {
         switch usage.range {
         case .today: return "today"
-        case .week: return "this week"
-        case .month: return "this month"
-        case .all: return "in \(Int(UsageStore.historyDays)) days"
+        case .week: return "in the last 7 days"
+        case .month: return "in the last 30 days"
+        case .all: return "in the last \(Int(UsageStore.historyDays)) days"
         }
     }
 
@@ -408,7 +445,7 @@ struct DashboardView: View {
     }
 
     private func hourLabel(_ h: Int) -> String {
-        h == 0 ? "12 AM" : h < 12 ? "\(h) AM" : h == 12 ? "12 PM" : "\(h - 12) PM"
+        Fmt.hourLabel(h)
     }
 
     // MARK: Sessions
@@ -427,7 +464,7 @@ struct DashboardView: View {
                     Text(usage.loading ? "Reading your sessions…" : "No sessions in this range").font(.system(size: 13)).foregroundStyle(Dash.dim)
                 }
                 ForEach(list) { s in
-                    let selected = (usage.selectedSession ?? list.first?.id) == s.id
+                    let selected = shownSession(in: list) == s.id
                     Button { usage.selectedSession = s.id } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -448,8 +485,8 @@ struct DashboardView: View {
     }
 
     private var sessionDetailCard: some View {
-        let list = usage.sessions
-        let s = list.first { $0.id == (usage.selectedSession ?? list.first?.id) }
+        let list = Array(usage.sessions.prefix(8))
+        let s = list.first { $0.id == shownSession(in: list) }
         return GlowCard(glow: Dash.claude, glowAt: UnitPoint(x: 1, y: 0), glowSize: 220, glowOpacity: 0.3) {
             if let s {
                 VStack(alignment: .leading, spacing: 14) {
@@ -475,9 +512,16 @@ struct DashboardView: View {
                     }
                 }
             } else {
-                Text("Pick a session").foregroundStyle(Dash.dim)
+                Text(list.isEmpty ? "No sessions in this range" : "Pick a session").foregroundStyle(Dash.dim)
             }
         }
+    }
+
+    /// The picked session while it's still listed, else the top one. A pick left over from another range or account
+    /// used to leave nothing highlighted and the detail card blank.
+    private func shownSession(in list: [SessionSummary]) -> String? {
+        if let id = usage.selectedSession, list.contains(where: { $0.id == id }) { return id }
+        return list.first?.id
     }
 
     // MARK: Projects

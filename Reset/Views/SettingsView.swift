@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 /// Settings in four tabs, so the everyday choices aren't buried among technical ones: General (live usage,
 /// tools, alerts), Automation (auto-start, stay awake), Appearance (look, mascots), and Advanced (commands,
@@ -8,6 +9,8 @@ struct SettingsView: View {
     @State private var newName = ""
     @State private var newHours = 5.0
     @State private var topicDraft = ""
+    /// Whether macOS lets Reset show notifications; nil until checked.
+    @State private var notificationsAllowed: Bool?
     /// Remembered between openings; `-settingsTab advanced` on the command line opens a given tab (for renders).
     @AppStorage("settingsTab") private var tab = "general"
     @AppStorage("menuBarStyle") private var menuBarStyle = "pill"
@@ -21,7 +24,14 @@ struct SettingsView: View {
             advanced.tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }.tag("advanced")
         }
         .frame(width: 540, height: 680)
-        .onAppear { topicDraft = store.ntfyTopic }
+        .onAppear {
+            topicDraft = store.ntfyTopic
+            // Denied (or later switched off in System Settings), every Alert box here still looked on and nothing came.
+            UNUserNotificationCenter.current().getNotificationSettings { s in
+                let ok = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional
+                DispatchQueue.main.async { notificationsAllowed = ok }
+            }
+        }
     }
 
     // MARK: General
@@ -71,6 +81,18 @@ struct SettingsView: View {
             }
 
             Section {
+                if notificationsAllowed == false {
+                    HStack {
+                        Label("Notifications are off for Reset", systemImage: "bell.slash").foregroundStyle(.orange)
+                        Spacer()
+                        Button("Open System Settings") {
+                            let id = Bundle.main.bundleIdentifier ?? "in.trak.reset"
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    }
+                }
                 Picker("Heads-up before reset", selection: $store.leadMinutes) {
                     Text("Off").tag(0)
                     ForEach([5, 10, 15, 30], id: \.self) { Text("\($0) min").tag($0) }

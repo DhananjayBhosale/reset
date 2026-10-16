@@ -205,6 +205,24 @@ final class ForecastTests: XCTestCase {
         f.record(used: 1, resetsAt: start.addingTimeInterval(30000), now: start.addingTimeInterval(16 * 60))
         XCTAssertNil(f.runsOutAt)
     }
+
+    func testTheWarningSaysWhatPaceItIsBasedOn() {
+        let f = Forecast(), start = Date(), reset = start.addingTimeInterval(7200)
+        for m in 0...15 { f.record(used: 40 + Double(m), resetsAt: reset, now: start.addingTimeInterval(Double(m) * 60)) }
+        XCTAssertEqual(f.basis, "About 60% of the window an hour over the last 15 minutes")
+        XCTAssertNil(Forecast().basis, "no readings, nothing to explain")
+    }
+
+    func testRunOutTimeOnlyShowsWhileItStillMeansSomething() {
+        let f = Forecast(), start = Date(), reset = start.addingTimeInterval(7200)
+        for m in 0...15 { f.record(used: 40 + Double(m), resetsAt: reset, now: start.addingTimeInterval(Double(m) * 60)) }
+        let now = start.addingTimeInterval(15 * 60), out = f.runsOutAt!
+        XCTAssertEqual(f.current(now: now, resetsAt: reset), out)
+        XCTAssertNil(f.current(now: now.addingTimeInterval(20 * 60), resetsAt: reset), "readings stopped 20 minutes ago")
+        XCTAssertNil(f.current(now: out.addingTimeInterval(60), resetsAt: reset), "already past")
+        XCTAssertNil(f.current(now: now, resetsAt: nil), "no window running")
+        XCTAssertNil(f.current(now: now, resetsAt: out.addingTimeInterval(-60)), "a window that resets first")
+    }
 }
 
 final class ProjectAndVersionTests: XCTestCase {

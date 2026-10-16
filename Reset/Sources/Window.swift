@@ -67,17 +67,27 @@ enum Fmt {
         return "\(h):\(String(format: "%02d", m))"
     }
 
+    /// Clock times follow the Mac's 12/24-hour setting ("9:29 PM" or "21:29"); a fixed "h:mm a" ignored it.
     static let clock: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "h:mm a"
+        f.setLocalizedDateFormatFromTemplate("jmm")
         return f
     }()
 
     static let dayClock: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "EEE h:mm a"
+        f.setLocalizedDateFormatFromTemplate("EEEjmm")
         return f
     }()
+
+    /// Whether this Mac shows 24-hour times.
+    static var uses24Hour: Bool { !(DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current) ?? "").contains("a") }
+
+    /// An hour for chart axes: "6 AM", or "06" on a 24-hour Mac.
+    static func hourLabel(_ h: Int) -> String {
+        if uses24Hour { return String(format: "%02d", h) }
+        return h == 0 ? "12 AM" : h < 12 ? "\(h) AM" : h == 12 ? "12 PM" : "\(h - 12) PM"
+    }
 
     static func when(_ date: Date, now: Date = Date()) -> String {
         Calendar.current.isDate(date, inSameDayAs: now) ? clock.string(from: date) : dayClock.string(from: date)

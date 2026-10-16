@@ -97,8 +97,9 @@ struct TickerWidget: Widget {
 struct Ticker: View {
     let e: Entry
     var body: some View {
-        let today = e.snap?.todayCumulative ?? Array(repeating: 0, count: 24)
-        let yest = e.snap?.yesterdayCumulative ?? Array(repeating: 0, count: 24)
+        let curves = e.snap?.dayCurves(on: e.date)
+        let today = curves?.today ?? Array(repeating: 0, count: 24)
+        let yest = curves?.yesterday ?? Array(repeating: 0, count: 24)
         let hour = Calendar.current.component(.hour, from: e.date)
         let now = today[min(23, hour)], thenY = yest[min(23, hour)]
         let diff = now - thenY
@@ -224,8 +225,9 @@ struct MonthCalendar: View {
     let e: Entry
     var body: some View {
         let cal = Calendar.current
-        let days = e.snap?.monthDays ?? []
-        let limits = Set(e.snap?.limitDays ?? [])
+        let month = e.snap?.month(on: e.date)
+        let days = month?.days ?? []
+        let limits = Set(month?.limitDays ?? [])
         let first = cal.date(from: cal.dateComponents([.year, .month], from: e.date))!
         let lead = (cal.component(.weekday, from: first) + 5) % 7
         let today = cal.component(.day, from: e.date)

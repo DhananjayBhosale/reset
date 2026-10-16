@@ -87,7 +87,10 @@ struct MenuBarGlance: Equatable {
     }
 
     /// "6:40" without AM/PM: the run-out time is always within the next five hours, and the pill stays narrow.
-    private static let shortClock: DateFormatter = { let f = DateFormatter(); f.dateFormat = "h:mm"; return f }()
+    /// On a 24-hour Mac "21:29", since "9:29" there reads as morning.
+    private static let shortClock: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = Fmt.uses24Hour ? "HH:mm" : "h:mm"; return f
+    }()
 
     /// Claude needs no letter (it's what Reset is mostly for); other tools get theirs so it's clear whose window it is.
     private static func prefix(_ s: WindowStatus) -> String {
