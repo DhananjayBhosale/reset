@@ -36,6 +36,7 @@ struct GaugeSmall: View {
             if let d = claudeCard(e) {
                 let left = d.left(at: e.date) ?? 1
                 ZStack {
+                    // The tick marks are drawing only; the number in the middle is what VoiceOver reads.
                     Canvas { ctx, size in
                         let c = CGPoint(x: size.width / 2, y: size.height / 2), r = min(size.width, size.height) / 2 - 2
                         let n = 48
@@ -50,6 +51,7 @@ struct GaugeSmall: View {
                                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
                         }
                     }
+                    .accessibilityHidden(true)
                     VStack(spacing: 0) {
                         // "~" and "time left" when it's the clock rather than a usage reading; "est." when guessed.
                         Text((d.usageKnown || d.isReady(at: e.date) ? "" : "~") + "\(Int((left * 100).rounded()))%")

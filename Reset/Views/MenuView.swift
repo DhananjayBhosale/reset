@@ -262,6 +262,8 @@ struct HealthDots: View {
                 Capsule().fill(lit ? (left == nil ? color.opacity(0.3) : color) : Color.white.opacity(0.12)).frame(width: 7, height: 4)
             }
         }
+        .accessibilityElement()
+        .accessibilityLabel(left.map { "\(Int(($0 * 100).rounded())) percent left" } ?? "usage unknown")
     }
 }
 

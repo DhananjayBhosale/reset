@@ -43,7 +43,9 @@ final class MenuBarGlanceTests: XCTestCase {
     }
 
     func testFreshWindowIsGreenReady() {
-        XCTAssertEqual(glance(ready: s(.ready)), MenuBarGlance(tone: .ready, text: "ready"))
+        let g = glance(ready: s(.ready))
+        XCTAssertEqual(g?.tone, .ready)
+        XCTAssertEqual(g?.text, "ready")
     }
 
     func testWeeklyLimitOutranksEverything() {
@@ -60,6 +62,24 @@ final class MenuBarGlanceTests: XCTestCase {
         XCTAssertEqual(glance(soonest: codex)?.text, "C 1:00 · 80%")
         XCTAssertEqual(glance(soonest: codex, signedOut: true)?.warning, false, "the sign-in warning is Claude's")
         XCTAssertEqual(glance(soonest: active(3600), signedOut: true)?.warning, true)
+    }
+
+    func testVoiceOverHearsItInWords() {
+        XCTAssertEqual(glance(soonest: active(2 * 3600 + 46 * 60))?.spoken, "Claude: 2 hours 46 minutes until the reset, 42 percent left")
+        XCTAssertEqual(glance(soonest: active(1800, used: 91))?.spoken, "Claude: 30 minutes until the reset, 9 percent left, almost empty")
+        XCTAssertTrue(glance(soonest: active(2 * 3600, used: 14), out: 52 * 60)?.spoken
+            .hasPrefix("Claude: 86 percent left, but at this pace it runs out at ") == true)
+        XCTAssertEqual(glance(ready: s(.ready))?.spoken, "Claude: a fresh window is ready")
+        XCTAssertTrue(glance(soonest: active(3600), signedOut: true)?.spoken.hasPrefix("Claude Code is signed out. Claude: ") == true)
+        let pro = s(.active(resetsAt: now.addingTimeInterval(3600)), id: "claude-pro", name: "Claude · Pro", used: 20)
+        XCTAssertEqual(glance(soonest: pro)?.spoken, "Claude Pro: 1 hour until the reset, 80 percent left", "no \"dot\" read aloud")
+    }
+
+    func testDurationsInWords() {
+        XCTAssertEqual(MenuBarGlance.words(60), "1 minute")
+        XCTAssertEqual(MenuBarGlance.words(3600), "1 hour")
+        XCTAssertEqual(MenuBarGlance.words(2 * 3600 + 60), "2 hours 1 minute")
+        XCTAssertEqual(MenuBarGlance.words(20), "less than a minute")
     }
 
     func testNothingToShow() {

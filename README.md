@@ -93,6 +93,8 @@ If macOS asks whether `security` may read "Claude Code-credentials" from your Ke
 
 **The countdown is off, or the window started earlier than Reset thinks.** Without live usage, Reset can't see Claude used on claude.ai or in the desktop app, only Claude Code. Live usage fixes this. Without it, pick **I just used Claude on the web** from the menu's **…** button when you start there.
 
+**I use two Claude accounts (say, a work Team plan and a personal Pro plan).** Reset shows each as its own entry, with its own window and countdown, worked out from that account's Claude Code sessions. Live usage, the forecast, auto-start and budgets follow the account the Claude Code CLI is signed in to (`claude auth status` shows which); the other one is estimated, plus the Claude desktop app's readings for it. The dashboard's costs still add both together.
+
 **The menu bar shows only the countdown, with no percentage.** There's no usage reading yet, and Reset won't show the clock as if it were usage. Turn on live usage. Want plain text instead of the colored pill? **Settings → Appearance → Menu bar**.
 
 **Phone alerts don't arrive.** Check that the topic in **Settings → General → Phone alerts** matches the one you subscribed to in the ntfy app exactly, then press **Send test**. Make sure notifications are allowed for ntfy on your phone, and to get through Do Not Disturb, allow high-priority alerts for that topic in the ntfy app.

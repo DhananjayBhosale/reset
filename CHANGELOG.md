@@ -2,6 +2,12 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.11 — two accounts, and VoiceOver
+
+- Separate Claude accounts get separate entries: for example "Claude · Team" (the account the Claude Code CLI is signed in to, with live usage, the forecast and auto-start) and "Claude · Pro", each with its own window from its own sessions, plus the Claude desktop app's readings for the second one, including a weekly limit.
+- VoiceOver: the menu bar pill speaks ("Claude: 2 hours 46 minutes until the reset, 42 percent left"), dashboard switches say whether they're on, and charts and bars are described or skipped.
+- Every "slow down" from Anthropic is logged, to check whether 2-minute polling ever trips the limit.
+
 ## 0.3.10 — gentler on Anthropic's limits
 
 - Live usage remembers when Anthropic asks it to slow down, across restarts and app updates, instead of asking again straight away. After a restart, the last reading shows immediately if it's recent.

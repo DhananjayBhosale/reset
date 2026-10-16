@@ -76,7 +76,7 @@ struct MenuBarLabel: View {
                 // Nothing to act on during a weekly limit, so no colour: a moon and when it lifts, in the bar's own ink.
                 Text("\(Image(systemName: "moon.zzz.fill")) \(g.text)").monospacedDigit()
             } else if let img = MenuBarPill.image(g) {
-                Image(nsImage: img)
+                Image(nsImage: img).accessibilityLabel(g.spoken)
             } else {
                 Text(g.text).monospacedDigit()
             }

@@ -116,6 +116,7 @@ struct DashboardView: View {
             ForEach(store.visible.filter { MascotArt.providers.contains($0.id) }) { s in
                 HStack(spacing: 10) {
                     WindowArc(progress: arcProgress(s), color: Theme.color(for: s.id), lineWidth: 1.6)
+                        .accessibilityHidden(true)
                         .frame(width: 22, height: 13)
                     Text(s.name).font(.system(size: 13)).foregroundStyle(s.id == "claude" ? .white : Color.white.opacity(0.75))
                     Spacer()
@@ -175,6 +176,12 @@ struct DashboardView: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        // The capsule is drawn, so VoiceOver would only hear the name; say it's a switch and whether it's on.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(detail.map { "\(name), \($0)" } ?? name)
+        .accessibilityValue(on ? "On" : "Off")
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityHint(help)
     }
 
     private func arcProgress(_ s: WindowStatus) -> Double {
@@ -244,7 +251,9 @@ struct DashboardView: View {
                     .font(Dash.label)
                     }
                     .layoutPriority(1)
+                    // Decorative: the countdown beside it says the same in words.
                     WindowArc(progress: elapsed, color: Dash.claude)
+                        .accessibilityHidden(true)
                         .frame(minWidth: 110, maxWidth: 280)
                         .frame(height: 140)
                         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -257,6 +266,9 @@ struct DashboardView: View {
                     }
                     .padding(.bottom, 8)
                     BurnBar(fraction: (c?.usedPercent ?? 0) / 100)
+                        .accessibilityElement()
+                        .accessibilityLabel("Limit used")
+                        .accessibilityValue(c?.usedPercent.map { "\(Int($0.rounded())) percent" } ?? "unknown")
                         .overlay(alignment: .leading) {
                             // Where the budget's cap sits on the bar, so the line below has a place to point at.
                             if let b = store.budget {

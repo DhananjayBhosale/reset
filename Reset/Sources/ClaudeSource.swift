@@ -17,14 +17,25 @@ struct ClaudeSource: WindowSource {
     var extraStarts: [Date] = []
 
     func read(now: Date) -> WindowStatus {
-        var status = WindowStatus(id: id, name: "Claude", state: .ready, usedPercent: nil,
-                                  isEstimate: true, source: "Estimated from Claude Code activity", secondary: nil,
-                                  canAutoStart: true)
+        readAll(now: now, account: nil)[0]
+    }
+
+    /// One status per Claude account seen in the transcripts: "claude" for the account the Claude Code CLI is
+    /// signed in to (live usage, auto-start and budgets go through the CLI), and "claude-<org>" for any other
+    /// account used in the last week, each with its own window from its own sessions. With one account there's
+    /// just "Claude", as before.
+    func readAll(now: Date, account: ClaudeCLI.Account?) -> [WindowStatus] {
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects")
         guard FileManager.default.fileExists(atPath: root.path) else {
-            status.state = .unavailable("No ~/.claude/projects folder")
-            return status
+            var s = WindowStatus(id: id, name: "Claude", state: .unavailable("No ~/.claude/projects folder"), usedPercent: nil,
+                                 isEstimate: true, source: "Estimated from Claude Code activity", secondary: nil, canAutoStart: true)
+            s.lastActivity = nil
+            return [s]
         }
+
+        // A week of events from every account, to find the accounts and give the others their windows.
+        let week = Self.scanner.events(under: root, since: now.addingTimeInterval(-Self.otherLookback))
+        let main = Self.mainOrg(cliOrg: account?.orgId, events: week)
 
         // Widen the lookback until the oldest activity follows a gap of at least one window, so the chain of
         // windows is anchored at a real start rather than wherever the scan happened to begin.
@@ -33,7 +44,8 @@ struct ClaudeSource: WindowSource {
         var events: [TranscriptScanner.Event] = []
         while true {
             let horizon = now.addingTimeInterval(-lookback)
-            events = Self.scanner.events(under: root, since: horizon)
+            // Only the main account's sessions (and untagged ones, such as "I used Claude on the web").
+            events = Self.scanner.events(under: root, since: horizon).filter { $0.org == nil || $0.org == main }
             events += extraStarts.filter { $0 > horizon && $0 <= now }.map { .init(time: $0, kind: .activity) }
             events.sort { $0.time < $1.time }
             let firstActivity = events.first { $0.kind == .activity }?.time
@@ -42,9 +54,64 @@ struct ClaudeSource: WindowSource {
             lookback = min(lookback * 2, maxLookback)
         }
 
+        let others = Self.otherOrgs(events: week, main: main)
+        var mainStatus = Self.status(id: id, name: "Claude", events: events, org: main ?? Self.currentOrg(under: root), now: now,
+                                     canAutoStart: true)
+        if !others.isEmpty, let label = Self.planLabel(account?.plan) { mainStatus.name = "Claude · \(label)" }
+        var out = [mainStatus]
+        for org in others {
+            let mine = week.filter { $0.org == org }.sorted { $0.time < $1.time }
+            // Auto-start runs through the CLI, which is signed in to the main account, so it can't start these.
+            var s = Self.status(id: "claude-" + org.prefix(8), name: "Claude · " + Self.otherLabel(org: org), events: mine,
+                                org: org, now: now, canAutoStart: false)
+            // Say whose sessions it's estimated from, keeping anything appended (such as a used-up weekly limit).
+            if s.isEstimate, s.source.hasPrefix("Estimated from Claude Code activity") {
+                s.source = "Estimated from this account's Claude Code sessions" + s.source.dropFirst("Estimated from Claude Code activity".count)
+            }
+            out.append(s)
+        }
+        return out
+    }
+
+    /// Other accounts count if they were used in the last week; older ones have no window to show.
+    static let otherLookback: TimeInterval = 7 * 86400
+
+    /// The CLI's account when known, otherwise the account of the most recent activity.
+    static func mainOrg(cliOrg: String?, events: [TranscriptScanner.Event]) -> String? {
+        if let cliOrg { return cliOrg }
+        return events.filter { $0.kind == .activity && $0.org != nil }.max { $0.time < $1.time }?.org
+    }
+
+    /// Accounts other than the main one with real activity in the events, most recently used first.
+    static func otherOrgs(events: [TranscriptScanner.Event], main: String?) -> [String] {
+        var last: [String: Date] = [:]
+        for e in events where e.kind == .activity {
+            guard let o = e.org, o != main else { continue }
+            last[o] = max(last[o] ?? .distantPast, e.time)
+        }
+        return last.sorted { $0.value > $1.value }.map(\.key)
+    }
+
+    /// "team" → "Team" and so on, for naming the main entry when there's more than one account.
+    static func planLabel(_ plan: String?) -> String? {
+        guard let p = plan?.trimmingCharacters(in: .whitespaces), !p.isEmpty else { return nil }
+        return p.prefix(1).uppercased() + p.dropFirst()
+    }
+
+    /// The other account's plan isn't written anywhere Reset reads, but only Pro and Max plans have a weekly
+    /// limit, which the Claude desktop app logs for them; Team and Enterprise ones don't.
+    static func otherLabel(org: String, url: URL = PlanUsageLog.url) -> String {
+        PlanUsageLog.latest(org: org, url: url)?.sevenDay != nil ? "Pro" : "other account"
+    }
+
+    /// The window, limit hits and desktop-app reading for one account's events.
+    static func status(id: String, name: String, events: [TranscriptScanner.Event], org: String?, now: Date,
+                       canAutoStart: Bool) -> WindowStatus {
+        var status = WindowStatus(id: id, name: name, state: .ready, usedPercent: nil, isEstimate: true,
+                                  source: "Estimated from Claude Code activity", secondary: nil, canAutoStart: canAutoStart)
         let activity = events.filter { $0.kind == .activity }.map(\.time)
         status.lastActivity = activity.last { $0 <= now }
-        let result = Self.compute(events: events, activity: activity, now: now)
+        let result = compute(events: events, activity: activity, now: now)
         if let w = result.window {
             status.state = .active(resetsAt: w.end)
             status.isEstimate = !w.exact
@@ -55,16 +122,20 @@ struct ClaudeSource: WindowSource {
             status.blockedUntil = weekly
         }
 
-        // Real usage % from the Claude desktop app's own log, for the account Claude Code is signed in to.
+        // Real usage % from the Claude desktop app's own log, for this account.
         // A reading only counts if it was taken inside the current window; older ones describe a past window.
-        if let org = Self.currentOrg(under: root), let sample = PlanUsageLog.latest(org: org) {
-            let windowStart = status.resetsAt?.addingTimeInterval(-Self.window)
+        if let org, let sample = PlanUsageLog.latest(org: org) {
+            let windowStart = status.resetsAt?.addingTimeInterval(-window)
             // The desktop app only logs at moments like a window starting or the limit being hit, so a reading
             // is only trusted while fresh. A limit hit stays true for the rest of its window.
             if let ws = windowStart, sample.time >= ws,
                now.timeIntervalSince(sample.time) < 15 * 60 || sample.fiveHour >= 100 {
                 status.usedPercent = sample.fiveHour
                 status.usageAsOf = sample.time
+            }
+            // A used-up weekly limit, when no limit message gave its reset time: say so rather than nothing.
+            if status.blockedUntil == nil, let sd = sample.sevenDay, sd >= 100, now.timeIntervalSince(sample.time) < 7 * 86400 {
+                status.source += " · weekly limit used up as of \(Fmt.when(sample.time, now: now))"
             }
         }
         return status
@@ -165,9 +236,11 @@ final class TranscriptScanner {
         }
         var time: Date
         var kind: Kind
+        /// The Claude organization (account) of the session the event came from, when its transcript says.
+        var org: String? = nil
     }
 
-    private struct Entry { var mtime: Date; var size: Int; var events: [Event]; var offset: Int }
+    private struct Entry { var mtime: Date; var size: Int; var events: [Event]; var offset: Int; var org: String? }
     private var cache: [String: Entry] = [:]
     private let lock = NSLock()
 
@@ -189,14 +262,16 @@ final class TranscriptScanner {
             } else if let c = cache[url.path], size > c.offset, c.offset > 0 {
                 // Transcripts only grow: read just the new lines.
                 let (events, offset) = Self.parse(url, from: c.offset, size: size)
-                entry = Entry(mtime: mod, size: size, events: c.events + events, offset: offset)
+                entry = Entry(mtime: mod, size: size, events: c.events + events, offset: offset,
+                              org: Self.lastOrg(url, from: c.offset, size: size) ?? c.org)
                 cache[url.path] = entry
             } else {
                 let (events, offset) = Self.parse(url, from: 0, size: size)
-                entry = Entry(mtime: mod, size: size, events: events, offset: offset)
+                entry = Entry(mtime: mod, size: size, events: events, offset: offset, org: Self.lastOrg(url, from: 0, size: size))
                 cache[url.path] = entry
             }
-            out += entry.events.filter { $0.time >= since }
+            // A session runs under one account; its transcript's org applies to all its events.
+            out += entry.events.filter { $0.time >= since }.map { var e = $0; e.org = entry.org; return e }
         }
         // Drop cache entries for files that aged out of every possible lookback.
         if cache.count > seen.count + 200 { cache = cache.filter { seen.contains($0.key) } }
@@ -208,6 +283,17 @@ final class TranscriptScanner {
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
+
+    /// The last `organizationUuid` Claude Code wrote in this part of a transcript (its credential rows).
+    static func lastOrg(_ url: URL, from start: Int, size: Int) -> String? {
+        guard let all = try? Data(contentsOf: url, options: .mappedIfSafe), all.count > start else { return nil }
+        let data = all[start..<min(all.count, max(size, start))]
+        let key = Data("\"organizationUuid\":\"".utf8)
+        guard let r = data.range(of: key, options: .backwards) else { return nil }
+        let rest = data[r.upperBound...]
+        guard let end = rest.firstIndex(of: UInt8(ascii: "\"")) else { return nil }
+        return String(data: rest[..<end], encoding: .utf8)
+    }
 
     static func parse(_ url: URL, from start: Int, size: Int) -> ([Event], Int) {
         guard let all = try? Data(contentsOf: url, options: .mappedIfSafe), all.count > start else { return ([], start) }

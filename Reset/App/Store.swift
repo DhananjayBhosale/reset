@@ -237,8 +237,9 @@ final class Store {
         let custom = self.custom
         scanQueue.async { [weak self] in
             let t = Date()
-            var list: [WindowStatus] = [
-                ClaudeSource(extraStarts: extras).read(now: t),
+            // One Claude entry per account (see ClaudeSource.readAll), then the other tools.
+            var list = ClaudeSource(extraStarts: extras).readAll(now: t, account: ClaudeCLI.account(now: t))
+            list += [
                 CodexSource().read(now: t),
                 GeminiSource().read(now: t),
                 AntigravitySource().read(now: t),
@@ -478,7 +479,8 @@ final class Store {
             guard let self else { return }
             self.signingIn = false
             self.note(ok ? "Claude Code signed in" : "Claude Code sign-in didn't finish")
-            if ok { self.resumeAfterSignIn() }
+            // It may be a different account now; look again instead of trusting the cached one.
+            if ok { ClaudeCLI.forgetAccount(); self.resumeAfterSignIn() }
             self.liveClaude.retryNow { [weak self] in self?.refresh() }
         }
     }

@@ -47,7 +47,8 @@ enum MascotArt {
     static func eyes(_ provider: String, _ mood: Mood) -> [Eye] { eyeMap["\(provider)-\(mood.rawValue)"] ?? [] }
 
     static func image(_ provider: String, _ mood: Mood) -> NSImage? {
-        let key = "\(provider)-\(mood.rawValue)"
+        // Every Claude account wears Claude's mascot.
+        let key = "\(provider.hasPrefix("claude-") ? "claude" : provider)-\(mood.rawValue)"
         if let i = cache[key] { return i }
         guard let url = Bundle.main.url(forResource: key, withExtension: "png"),
               let img = NSImage(contentsOf: url) else { return nil }

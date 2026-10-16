@@ -63,7 +63,7 @@ struct SettingsView: View {
             }
 
             Section {
-                ForEach(builtIns, id: \.0) { id, name in toolRow(id: id, name: name) }
+                ForEach(toolList, id: \.0) { id, name in toolRow(id: id, name: name) }
             } header: {
                 Text("Your tools")
             } footer: {
@@ -119,6 +119,13 @@ struct SettingsView: View {
     }
 
     private let builtIns = [("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini CLI"), ("antigravity", "Antigravity")]
+
+    /// The built-in tools, with any other Claude account right after Claude, named as it appears elsewhere.
+    private var toolList: [(String, String)] {
+        let accounts = store.statuses.filter { $0.id.hasPrefix("claude-") }.map { ($0.id, $0.name) }
+        let main = store.statuses.first { $0.id == "claude" }?.name ?? "Claude"
+        return [("claude", main)] + accounts + builtIns.dropFirst()
+    }
 
     private func toolRow(id: String, name: String) -> some View {
         let status = store.statuses.first { $0.id == id }

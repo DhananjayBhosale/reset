@@ -95,6 +95,8 @@ struct Segments: View {
                 Capsule().fill(lit ? (health == nil ? color.opacity(0.3) : tint) : Color.white.opacity(0.1)).frame(height: 5)
             }
         }
+        .accessibilityElement()
+        .accessibilityLabel(health.map { "\(Int(($0 * 100).rounded())) percent left" } ?? "usage unknown")
     }
     private var tint: Color {
         guard let h = health else { return color }
@@ -211,6 +213,8 @@ struct WeekLarge: View {
             }
             Text("This week").font(.system(size: 11)).foregroundStyle(W.dim).padding(.top, 4)
             Barcode(windows: e.snap?.windows ?? [], date: e.date).frame(height: 120)
+                .accessibilityElement()
+                .accessibilityLabel("\(weekWindows) windows this week")
             HStack {
                 if let m = e.snap?.weekMultiple { stat(String(format: "%.1f×", m), "value") }
                 else { stat("\(weekWindows)", "windows") }

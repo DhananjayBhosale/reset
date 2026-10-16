@@ -40,6 +40,8 @@ struct Fuse: View {
                 Spacer(minLength: 2)
             }
             fuse(m).frame(height: m.state == .ready ? 22 : 44)
+                // The rope is drawing only; the headline and detail above already say it in words.
+                .accessibilityHidden(true)
             HStack {
                 Text(m.start.map(time) ?? " ").font(.system(size: 10)).foregroundStyle(W.dim)
                 Spacer()
