@@ -162,12 +162,24 @@ final class Alerts {
 
     static func sid(_ providerId: String) -> String { "reset-\(providerId)" }
 
-    func sendTest(server: String, topic: String, log: @escaping (String) -> Void) {
+    /// `result` gets a short outcome for beside the button ("Sent ✓", "Failed: HTTP 403"); it used to reach only
+    /// the Activity log, so a press seemed to do nothing either way.
+    func sendTest(server: String, topic: String, log: @escaping (String) -> Void, result: @escaping (String) -> Void = { _ in }) {
         guard let url = Self.endpoint(server: server, topic: topic) else {
             log("Phone test not sent: topic must be letters, numbers, - or _")
+            result("Not sent: check the topic")
             return
         }
-        post(url: url, sid: nil, title: "Reset test", body: "Phone alerts are working.", at: nil, priority: 3, log: log) { _ in }
+        post(url: url, sid: nil, title: "Reset test", body: "Phone alerts are working.", at: nil, priority: 3, log: { line in
+            log(line)
+            result(Self.testOutcome(line))
+        }) { _ in }
+    }
+
+    /// The log line, cut down to what fits beside the button. A test isn't retried, so "Will retry" goes.
+    static func testOutcome(_ line: String) -> String {
+        if line.hasPrefix("Phone test sent") { return "Sent ✓" }
+        return line.replacingOccurrences(of: "Phone push failed: ", with: "Failed: ").replacingOccurrences(of: ". Will retry", with: "")
     }
 
     private func post(url: URL, sid: String?, title: String, body: String, at: Date?, priority: Int,

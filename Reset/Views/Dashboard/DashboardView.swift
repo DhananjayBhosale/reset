@@ -439,7 +439,7 @@ struct DashboardView: View {
                         Text("busiest hour").font(Dash.label).foregroundStyle(Dash.dim)
                     }
                 }
-                Heatmap(grid: usage.scopedHeatmap).frame(height: 104)
+                Heatmap(grid: usage.scopedHeatmap, labels: true).frame(height: 120)
             }
         }
     }
@@ -479,6 +479,11 @@ struct DashboardView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .help(s.title)
+                    .contextMenu {
+                        Button("Copy command to resume it") { copyToClipboard(Self.resumeCommand(project: s.project, session: s.id)) }
+                        folderActions(s.project)
+                    }
                 }
             }
         }
@@ -578,9 +583,31 @@ struct DashboardView: View {
                     }
                     .padding(.vertical, 6)
                     .overlay(alignment: .top) { Rectangle().fill(Dash.line).frame(height: 1) }
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        folderActions(p.root)
+                        Button("Rename…") { draftName = ProjectNames.shared.name(for: p.root); renaming = p.root }
+                    }
                 }
             }
         }
+    }
+
+    /// Right-click actions for a project folder; rows could only be renamed or selected before.
+    @ViewBuilder private func folderActions(_ path: String) -> some View {
+        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+            .disabled(!FileManager.default.fileExists(atPath: path))
+        Button("Copy path") { copyToClipboard(path) }
+    }
+
+    private func copyToClipboard(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+    }
+
+    /// The Terminal line that reopens a session where it was: its folder, then `claude --resume`.
+    static func resumeCommand(project: String, session: String) -> String {
+        "cd '\(project.replacingOccurrences(of: "'", with: "'\\''"))' && claude --resume \(session)"
     }
 
     private func shareBar(_ s: SessionSummary) -> some View {

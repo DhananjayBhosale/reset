@@ -254,6 +254,19 @@ final class ProjectAndVersionTests: XCTestCase {
         XCTAssertFalse(Updater.isNewer("0.1", than: "0.1.1"))
         XCTAssertTrue(Updater.isNewer("1.0", than: "0.99"))
     }
+
+    func testWhatsNewIsTheNewPartOfTheNotesWithoutInstallSteps() {
+        let notes = """
+        **Install:** download `Reset-0.3.15.dmg`, open it and drag Reset to Applications.
+
+        **New in 0.3.15**
+        - **Shortcuts:** ⌘D dashboard
+
+        Full history: [CHANGELOG.md](https://example.com) · 160 unit tests
+        """
+        XCTAssertEqual(Updater.whatsNew(notes), "New in 0.3.15\n- Shortcuts: ⌘D dashboard")
+        XCTAssertEqual(Updater.whatsNew("Just text"), "Just text", "notes in another shape are shown as they are")
+    }
 }
 
 

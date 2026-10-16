@@ -13,6 +13,9 @@ struct WidgetSnapshot: Codable {
         var blockedUntil: Date?
         /// Why these numbers are a guess (see UsageAccuracy), or nil when they're solid. Optional for old snapshots.
         var estimate: String? = nil
+        /// The weekly limit, when known (live usage on a Pro or Max plan): % used and when it resets.
+        var weeklyUsed: Double? = nil
+        var weeklyResetsAt: Date? = nil
     }
     struct Window: Codable {
         var start: Date
@@ -80,6 +83,11 @@ struct WidgetSnapshot: Codable {
 
     var claude: Provider? { providers.first { $0.id == "claude" } }
 
+    /// Whether Reset is running, as of `now`, from its heartbeat (see Heartbeat).
+    static func appRunning(now: Date = Date(), heartbeat: URL = Heartbeat.url) -> Bool {
+        Heartbeat.lastBeat(at: heartbeat).map { now.timeIntervalSince($0) < Heartbeat.staleAfter } ?? false
+    }
+
     /// Today's and yesterday's running totals as seen on `date`. The stored series describe the day the snapshot
     /// was written, and a widget keeps the same snapshot for up to an hour, so just after midnight "today" showed
     /// all of yesterday. A snapshot from yesterday is yesterday's curve and nothing yet today.
@@ -95,5 +103,25 @@ struct WidgetSnapshot: Codable {
     func month(on date: Date, calendar: Calendar = .current) -> (days: [Double], limitDays: [Int]) {
         guard calendar.isDate(updated, equalTo: date, toGranularity: .month) else { return ([], []) }
         return (monthDays ?? [], limitDays ?? [])
+    }
+}
+
+/// Reset touches this file every 30 seconds while it runs and removes it when it quits. The status line and the
+/// MCP server read files Reset leaves behind, so without it a quit Reset's last countdown and usage looked live
+/// for days.
+enum Heartbeat {
+    static var url: URL { WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("running") }
+    /// Three missed beats: past this, Reset has quit, crashed, or the Mac slept through it.
+    static let staleAfter: TimeInterval = 180
+
+    static func beat(at url: URL = url) {
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data().write(to: url)
+    }
+
+    static func stop(at url: URL = url) { try? FileManager.default.removeItem(at: url) }
+
+    static func lastBeat(at url: URL = url) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 }

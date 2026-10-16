@@ -4,6 +4,7 @@ import SwiftUI
 struct MenuView: View {
     @Bindable var store: Store
     @Environment(\.openWindow) private var openWindow
+    @State private var showingNotes = false
 
     private var claude: WindowStatus? { store.visible.first { $0.id == "claude" } }
     private var hero: WindowStatus? { claude ?? store.visible.first }
@@ -116,9 +117,17 @@ struct MenuView: View {
     private func updateBanner(_ u: Updater.Release) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "arrow.down.circle.fill").foregroundStyle(Dash.green)
-            Text("Reset \(u.version) is available").font(.system(size: 12, weight: .semibold))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Reset \(u.version) is available").font(.system(size: 12, weight: .semibold))
+                Button("What's new") { showingNotes = true }
+                    .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.dim)
+                    .popover(isPresented: $showingNotes, arrowEdge: .bottom) { UpdateNotes(release: u) }
+            }
             Spacer()
-            Button("Download") { NSWorkspace.shared.open(u.url) }.buttonStyle(PillButtonStyle(tint: Dash.green))
+            Button("Skip") { store.updater.skip(u) }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Theme.dim)
+                .help("Don't offer \(u.version) again")
+            Button(Updater.builtFromSource ? "How to update" : "Download") { UpdateNotes.act(on: u) }
+                .buttonStyle(PillButtonStyle(tint: Dash.green))
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 12).fill(Dash.green.opacity(0.1)))
@@ -133,9 +142,11 @@ struct MenuView: View {
         }
         if h.id == "claude", let b = store.budget { budgetNotice(b) }
         if let sec = h.secondary {
+            // Amber from 80%: when the weekly limit runs out, a fresh 5-hour window won't help.
             Label("\(sec.label) resets \(Fmt.when(sec.resetsAt, now: store.now))\(sec.usedPercent.map { " · \(Int($0.rounded()))% used" } ?? "")",
                   systemImage: "calendar")
-                .font(.system(size: 11)).foregroundStyle(Theme.dim)
+                .font(.system(size: 11, weight: sec.isHigh ? .medium : .regular))
+                .foregroundStyle(sec.isHigh ? Color(hex: 0xFFB13D) : Theme.dim)
         }
     }
 
@@ -219,7 +230,7 @@ struct MenuView: View {
                 Button("Rescan now") { store.refresh(); store.usage.refresh() }
                     .keyboardShortcut("r")
                 Divider()
-                Button("Quit Reset") { NSApp.terminate(nil) }
+                Button("Quit Reset") { quit() }
                     .keyboardShortcut("q")
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold)).frame(width: 30, height: 26)
@@ -231,6 +242,20 @@ struct MenuView: View {
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(Color.white.opacity(0.03))
         .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1) }
+    }
+
+    /// Auto-start only runs while Reset is open, which nothing said; with it on, ask first. (Phone alerts are
+    /// queued on the ntfy server ahead of time, so those still arrive.)
+    private func quit() {
+        let armed = store.visible.filter { $0.canAutoStart && store.prefs(for: $0.id).autoStart }
+        guard !armed.isEmpty else { NSApp.terminate(nil); return }
+        let alert = NSAlert()
+        alert.messageText = "Quit Reset?"
+        alert.informativeText = "Auto-start won't open your next \(armed.map(\.name).joined(separator: " or ")) window while Reset is closed."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { NSApp.terminate(nil) }
     }
 
     private func open(_ id: String) {

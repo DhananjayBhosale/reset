@@ -117,7 +117,7 @@ final class MCPServerTests: XCTestCase {
     }
 
     private var env: MCPServer.Environment {
-        MCPServer.Environment(now: { [now] in now }, snapshot: { [weak self] in self?.snapshot }, budgetURL: budgetURL)
+        MCPServer.Environment(now: { [now] in now }, snapshot: { [weak self] in self?.snapshot }, budgetURL: budgetURL, running: { true })
     }
 
     /// Sends one NDJSON line and parses the reply line back, as a client would.
@@ -242,6 +242,25 @@ final class MCPServerTests: XCTestCase {
         let (report, _) = call("get_claude_usage")
         XCTAssertTrue((report["advice"] as? String)?.hasPrefix("Window nearly exhausted. At this pace") == true)
         XCTAssertEqual((report["claude"] as? [String: Any])?["minutes_until_run_out"] as? Int, 60)
+    }
+
+    func testWeeklyLimitIsReportedAndWarnedBeforeItsUsedUp() {
+        var s = snap(used: 20)
+        s.providers[0].weeklyUsed = 92; s.providers[0].weeklyResetsAt = now.addingTimeInterval(2 * 86400)
+        snapshot = s
+        let (report, _) = call("get_claude_usage")
+        XCTAssertEqual((report["claude"] as? [String: Any])?["weekly_percent_used"] as? Int, 92)
+        XCTAssertTrue((report["advice"] as? String)?.hasPrefix("The weekly limit is 92% used") == true)
+        s.providers[0].weeklyUsed = 50
+        snapshot = s
+        XCTAssertEqual(call("get_claude_usage").0["advice"] as? String, "Plenty of window left.", "half a week used is normal")
+    }
+
+    func testNumbersFromAResetThatQuitAreMarkedStale() {
+        let report = MCPServer.usageReport(snapshot: snap(used: 30), budget: nil, now: now, running: false)
+        XCTAssertEqual(report["stale"] as? Bool, true)
+        XCTAssertTrue((report["advice"] as? String)?.hasPrefix("Reset isn't running") == true)
+        XCTAssertNil(MCPServer.usageReport(snapshot: snap(used: 30), budget: nil, now: now)["stale"])
     }
 
     func testInvalidSetBudgetIsAToolErrorAndWritesNothing() {

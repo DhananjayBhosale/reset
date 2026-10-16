@@ -49,7 +49,7 @@ struct MenuBarLabel: View {
                 // `-openSettings YES` opens Settings, for checking it (with `-simulateLogFormat`, the format warning);
                 // `-renderSettings /path.png` also saves a picture of it, taken by Reset itself.
                 let d = UserDefaults.standard
-                if Demo.isOn { return }
+                if Demo.isOn || AppDelegate.underTest { return }
                 if !d.bool(forKey: "onboarded") || d.bool(forKey: "openWelcome") {
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "welcome")
@@ -120,9 +120,19 @@ extension Store {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// The unit tests run inside a copy of the app. Started for real, that copy polled Anthropic's usage endpoint,
+    /// wrote the status line and heartbeat, and on quit told the real Reset's status line it wasn't running.
+    static let underTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !Self.underTest else { return }
         UNUserNotificationCenter.current().delegate = self
         Store.shared.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        guard !Self.underTest else { return }
+        Store.shared.markQuit()
     }
 
     // A click on a banner opens the dashboard; its buttons sign in or start the window.

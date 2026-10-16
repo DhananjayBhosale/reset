@@ -9,6 +9,13 @@ struct SettingsView: View {
     @State private var newName = ""
     @State private var newHours = 5.0
     @State private var topicDraft = ""
+    @State private var statusLineState = ClaudeIntegration.State.missing
+    @State private var mcpState = ClaudeIntegration.State.missing
+    @State private var integrationMessage: String?
+    @State private var confirmReplaceStatusLine = false
+    @State private var installingMCP = false
+    @State private var showingUpdateNotes = false
+    @State private var testResult: String?
     /// Whether macOS lets Reset show notifications; nil until checked.
     @State private var notificationsAllowed: Bool?
     /// Remembered between openings; `-settingsTab advanced` on the command line opens a given tab (for renders).
@@ -24,6 +31,12 @@ struct SettingsView: View {
             advanced.tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }.tag("advanced")
         }
         .frame(width: 540, height: 680)
+        .onDisappear {
+            // A topic typed but never saved was lost when Settings closed.
+            if topicDraft != store.ntfyTopic, !topicDraft.isEmpty, Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) != nil {
+                store.ntfyTopic = topicDraft
+            }
+        }
         .onAppear {
             topicDraft = store.ntfyTopic
             // Denied (or later switched off in System Settings), every Alert box here still looked on and nothing came.
@@ -102,7 +115,16 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Send reset alerts to my phone", isOn: $store.phoneEnabled)
+                // On with no topic sent nothing at all; a typed topic is saved first, an empty one keeps it off.
+                Toggle("Send reset alerts to my phone", isOn: Binding(get: { store.phoneEnabled }, set: { on in
+                    if on, store.ntfyTopic.isEmpty {
+                        guard !topicDraft.isEmpty, Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) != nil else {
+                            testResult = "Add a topic first"; return
+                        }
+                        store.ntfyTopic = topicDraft
+                    }
+                    store.phoneEnabled = on
+                }))
                 HStack {
                     TextField("Topic", text: $topicDraft, prompt: Text("a long random name only you know"))
                         .onSubmit { store.ntfyTopic = topicDraft }
@@ -110,7 +132,17 @@ struct SettingsView: View {
                         .disabled(topicDraft == store.ntfyTopic || Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) == nil)
                 }
                 HStack {
-                    Button("Send test") { store.sendTestPush() }.disabled(store.ntfyTopic.isEmpty)
+                    Button("Send test") {
+                        testResult = "Sending…"
+                        store.sendTestPush { r in
+                            testResult = r
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { if testResult == r { testResult = nil } }
+                        }
+                    }
+                    .disabled(store.ntfyTopic.isEmpty)
+                    if let r = testResult {
+                        Text(r).font(.caption).foregroundStyle(r.hasPrefix("Sent") ? Color.green : r == "Sending…" ? Color.secondary : Color.orange)
+                    }
                     Spacer()
                     if Alerts.endpoint(server: store.ntfyServer, topic: topicDraft) == nil && !topicDraft.isEmpty {
                         Text("Letters, numbers, - and _ only").font(.caption).foregroundStyle(.red)
@@ -123,6 +155,27 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                // Also here, not only behind the dashboard's Edit plan: the setup guide says everything is in Settings.
+                let accounts = store.usage.accounts.count > 1 ? store.usage.accounts.map { ($0.id, $0.name) } : [("claude", "Claude")]
+                ForEach(accounts, id: \.0) { id, name in
+                    HStack {
+                        Text(accounts.count > 1 ? name : "Claude plan")
+                        Spacer()
+                        Text("$")
+                        TextField("", value: Binding(get: { store.usage.planMonthly(for: id) }, set: { store.usage.setPlanMonthly($0, for: id) }),
+                                  format: .number, prompt: Text("20"))
+                            .frame(width: 80).multilineTextAlignment(.trailing)
+                        Text("/ month").foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("What you pay")
+            } footer: {
+                Text("Only used on this Mac, for the value multiple on the dashboard (API value of your usage against what you pay).")
+                    .foregroundStyle(.secondary)
+            }
+
             Section("General") {
                 Toggle("Open at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.launchAtLogin = $0 }))
                 Toggle("Check for updates automatically", isOn: Binding(get: { store.updater.automatic }, set: { store.updater.automatic = $0 }))
@@ -130,7 +183,10 @@ struct SettingsView: View {
                     Text(updateText).foregroundStyle(store.updater.available == nil ? Color.secondary : Color.green)
                     Spacer()
                     if let u = store.updater.available {
-                        Button("Download \(u.version)") { NSWorkspace.shared.open(u.url) }
+                        Button("What's new") { showingUpdateNotes = true }
+                            .popover(isPresented: $showingUpdateNotes, arrowEdge: .bottom) { UpdateNotes(release: u) }
+                        Button("Skip") { store.updater.skip(u) }.help("Don't offer \(u.version) again")
+                        Button(Updater.builtFromSource ? "How to update" : "Download \(u.version)") { UpdateNotes.act(on: u) }
                     } else {
                         Button(store.updater.checking ? "Checking…" : "Check now") { store.updater.check() }.disabled(store.updater.checking)
                     }
@@ -339,12 +395,32 @@ struct SettingsView: View {
             }
 
             Section {
-                integrationRow("Status line", "Add to ~/.claude/settings.json",
-                               #""statusLine": {"type": "command", "command": "cat \"$HOME/Library/Application Support/Reset/statusline.txt\""}"#)
-                integrationRow("MCP server", "Lets Claude check your window and set pacing budgets",
-                               "claude mcp add --scope user reset -- /Applications/Reset.app/Contents/MacOS/reset-mcp")
+                integrationRow("Status line", "Your window, what's left and today's spend at the bottom of Claude Code",
+                               state: statusLineState,
+                               snippet: statusLineSnippet,
+                               otherNote: "Claude Code shows another status line", busy: false) {
+                    if case .other = statusLineState { confirmReplaceStatusLine = true } else { installStatusLine() }
+                }
+                integrationRow("MCP server", "Lets Claude check its own window and set pacing budgets",
+                               state: mcpState,
+                               snippet: "claude mcp add --scope user reset -- \"\(ClaudeIntegration.mcpPath)\"",
+                               otherNote: "Set up for a copy of Reset somewhere else", busy: installingMCP) {
+                    installingMCP = true
+                    ClaudeIntegration.installMCP { error in
+                        installingMCP = false
+                        integrationMessage = error.map { "MCP server: \($0)" } ?? "MCP server added. It's available in new Claude Code sessions."
+                        refreshIntegration()
+                    }
+                }
+                if let m = integrationMessage { Text(m).font(.caption).foregroundStyle(.secondary) }
             } header: {
                 Text("Claude Code integration")
+            }
+            .onAppear { refreshIntegration() }
+            .confirmationDialog("Replace Claude Code's status line?", isPresented: $confirmReplaceStatusLine) {
+                Button("Replace") { installStatusLine() }
+            } message: {
+                Text("Claude Code already runs another status line. Reset saves your settings as settings.json.before-reset first.")
             }
 
             Section {
@@ -387,20 +463,63 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    /// A copyable snippet for wiring Reset into Claude Code.
-    private func integrationRow(_ title: String, _ detail: String, _ snippet: String) -> some View {
+    /// The status line setting as a line of JSON, for adding by hand.
+    private var statusLineSnippet: String {
+        let command = ClaudeIntegration.statusLineCommand.replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"statusLine\": {\"type\": \"command\", \"command\": \"\(command)\"}"
+    }
+
+    private func refreshIntegration() {
+        statusLineState = ClaudeIntegration.statusLineState()
+        mcpState = ClaudeIntegration.mcpState()
+    }
+
+    private func installStatusLine() {
+        do {
+            try ClaudeIntegration.installStatusLine()
+            integrationMessage = "Status line added. Claude Code picks it up in its next session."
+        } catch {
+            integrationMessage = "Status line: \(error.localizedDescription)"
+        }
+        refreshIntegration()
+    }
+
+    /// One Claude Code integration: whether it's set up, a button that sets it up, and the snippet to do it by hand.
+    @State private var copiedSnippet: String?
+
+    private func integrationRow(_ title: String, _ detail: String, state: ClaudeIntegration.State, snippet: String,
+                                otherNote: String, busy: Bool, install: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
                 Spacer()
-                Button("Copy") {
+                switch state {
+                case .installed:
+                    Label("Set up", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+                case .missing:
+                    Button(busy ? "Adding…" : "Add for me", action: install).controlSize(.small).disabled(busy)
+                case .other:
+                    Button(busy ? "Adding…" : "Use Reset's", action: install).controlSize(.small).disabled(busy)
+                case .outdated:
+                    Button("Update", action: install).controlSize(.small)
+                }
+                Button(copiedSnippet == snippet ? "Copied" : "Copy") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(snippet, forType: .string)
+                    copiedSnippet = snippet
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copiedSnippet == snippet { copiedSnippet = nil } }
                 }
                 .controlSize(.small)
             }
             Text(detail).font(.caption).foregroundStyle(.secondary)
-            Text(snippet).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(3)
+            if case .other = state { Text(otherNote).font(.caption).foregroundStyle(.orange) }
+            if state == .outdated {
+                Text("An older version of Reset's line, which keeps showing the last countdown after Reset quits. Update fixes that.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            if state != .installed {
+                Text(snippet).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(3)
+            }
         }
     }
 

@@ -215,15 +215,31 @@ struct TokenGrid: View {
 struct Heatmap: View {
     let grid: [[Double]]
     var color: Color = Dash.claude
+    /// Weekday rows and hour columns. Without them nobody could tell which row was Monday.
+    var labels = false
     var body: some View {
         Canvas { ctx, size in
             let rows = grid.count, cols = 24, gap: CGFloat = 3
-            let w = (size.width - gap * CGFloat(cols - 1)) / CGFloat(cols)
-            let h = (size.height - gap * CGFloat(rows - 1)) / CGFloat(rows)
+            let labelW: CGFloat = labels ? 30 : 0, hoursH: CGFloat = labels ? 16 : 0
+            let w = (size.width - labelW - gap * CGFloat(cols - 1)) / CGFloat(cols)
+            let h = (size.height - hoursH - gap * CGFloat(rows - 1)) / CGFloat(rows)
             let maxV = grid.flatMap { $0 }.max() ?? 0
+            if labels {
+                // Rows start on Monday (see UsageStore.heatmap).
+                let days = Calendar.current.shortWeekdaySymbols
+                for r in 0..<rows {
+                    let name = days[(r + 1) % 7]
+                    ctx.draw(Text(name).font(.system(size: 9)).foregroundColor(Dash.faint),
+                             at: CGPoint(x: 0, y: CGFloat(r) * (h + gap) + h / 2), anchor: .leading)
+                }
+                for hr in [0, 6, 12, 18] {
+                    ctx.draw(Text(Fmt.hourLabel(hr)).font(.system(size: 9)).foregroundColor(Dash.faint),
+                             at: CGPoint(x: labelW + CGFloat(hr) * (w + gap), y: size.height - 6), anchor: .leading)
+                }
+            }
             for r in 0..<rows { for c in 0..<cols {
                 let v = maxV > 0 ? grid[r][c] / maxV : 0
-                let rect = CGRect(x: CGFloat(c) * (w + gap), y: CGFloat(r) * (h + gap), width: w, height: h)
+                let rect = CGRect(x: labelW + CGFloat(c) * (w + gap), y: CGFloat(r) * (h + gap), width: w, height: h)
                 ctx.fill(Path(roundedRect: rect, cornerRadius: 3),
                          with: .color(v < 0.02 ? Color.white.opacity(0.06) : color.opacity(0.22 + 0.78 * sqrt(v))))
             } }

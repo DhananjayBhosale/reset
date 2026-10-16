@@ -2,6 +2,16 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.16 — easier setup, earlier warnings
+
+- One-click Claude Code setup: Settings → Advanced shows whether the status line and MCP server are set up and adds them for you (backing up settings.json first), using Reset's real location.
+- The status line and MCP server say when Reset isn't running, instead of showing the last numbers as if they were live. Settings offers Update for the older status line.
+- The weekly limit warns from 80%: amber in the menu, "wk 85%" in the status line, one notification per week, and the numbers for Claude through MCP.
+- The update button downloads the DMG, shows what's new, can skip a version, and tells copies built from source how to rebuild instead.
+- Right-click projects and sessions to reveal the folder, copy its path, or copy a command that resumes the session.
+- Send test shows whether it worked; the phone switch needs a topic; plan prices are in Settings too; Quit asks first when auto-start is on; the heatmap labels days and hours.
+- The test suite no longer starts a second, fully running Reset alongside yours.
+
 ## 0.3.15 — polish
 
 - The run-out warning only shows while it's still ahead and live readings are arriving; it no longer freezes on an old time.

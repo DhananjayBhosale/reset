@@ -1,11 +1,18 @@
 import Foundation
 import Observation
 
-/// Asks GitHub once a day whether a newer Reset release exists. No dependencies, no installer:
-/// it shows the new version and opens the release page.
+/// Asks GitHub once a day whether a newer Reset release exists. No dependencies, no installer: it shows the new
+/// version and what's in it, and downloads the DMG (or, for a copy built from source, says how to rebuild).
 @Observable
 final class Updater {
-    struct Release { var version: String; var url: URL; var notes: String }
+    struct Release {
+        var version: String
+        var url: URL
+        var notes: String
+        /// The release's .dmg, so Download saves it instead of opening a page to find it on.
+        var download: URL? = nil
+        var whatsNew: String { Updater.whatsNew(notes) }
+    }
 
     var automatic: Bool { didSet { UserDefaults.standard.set(automatic, forKey: "checkUpdates") } }
     private(set) var available: Release?
@@ -44,15 +51,42 @@ final class Updater {
                 self.lastChecked = Date()
                 guard err == nil, code == 200, let obj, let tag = obj["tag_name"] as? String,
                       let page = (obj["html_url"] as? String).flatMap(URL.init(string:)) else {
-                    self.lastError = code == 404 ? "No releases yet" : "Couldn't reach GitHub"
+                    self.lastError = code == 404 ? "No releases yet"
+                        : code == 403 || code == 429 ? "GitHub is limiting checks; try again in an hour" : "Couldn't reach GitHub"
                     return
                 }
                 self.lastError = nil
                 let version = tag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-                self.available = Self.isNewer(version, than: Self.current)
-                    ? Release(version: version, url: page, notes: obj["body"] as? String ?? "") : nil
+                let dmg = (obj["assets"] as? [[String: Any]] ?? [])
+                    .first { ($0["name"] as? String)?.hasSuffix(".dmg") == true }
+                    .flatMap { ($0["browser_download_url"] as? String).flatMap(URL.init(string:)) }
+                self.available = Self.isNewer(version, than: Self.current) && version != self.skipped
+                    ? Release(version: version, url: page, notes: obj["body"] as? String ?? "", download: dmg) : nil
             }
         }.resume()
+    }
+
+    /// A version the user chose to skip: not offered again, though a later one is.
+    private(set) var skipped = UserDefaults.standard.string(forKey: "skippedVersion")
+
+    func skip(_ r: Release) {
+        skipped = r.version
+        UserDefaults.standard.set(r.version, forKey: "skippedVersion")
+        available = nil
+    }
+
+    /// A copy built from source with a team ID has widgets; the download is ad-hoc signed and has none, so
+    /// updating from it would quietly remove them. Such a copy is told how to rebuild instead.
+    static var builtFromSource: Bool { ProblemReport.hasTeamSignature }
+    static let rebuildCommand = "git pull && TEAM=<your team ID> ./scripts/build.sh --install"
+
+    /// The "New in…" part of the release notes, without the install steps every release repeats.
+    static func whatsNew(_ notes: String) -> String {
+        var text = notes
+        if let r = text.range(of: "**New in") { text = String(text[r.lowerBound...]) }
+        if let r = text.range(of: "Full history") { text = String(text[..<r.lowerBound]) }
+        text = text.replacingOccurrences(of: "**", with: "")
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Numeric comparison of dotted versions: 0.10 is newer than 0.9.

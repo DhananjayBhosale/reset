@@ -10,6 +10,7 @@ enum MCPServer {
         var now: () -> Date = Date.init
         var snapshot: () -> WidgetSnapshot? = WidgetSnapshot.load
         var budgetURL: URL = Budget.url
+        var running: () -> Bool = { WidgetSnapshot.appRunning() }
     }
 
     /// One NDJSON line in, at most one line out. Unparseable lines are ignored, as before the split.
@@ -35,7 +36,7 @@ enum MCPServer {
         case "initialize":
             let requested = params?["protocolVersion"] as? String ?? "2025-06-18"
             return result(["protocolVersion": requested, "capabilities": ["tools": [String: Any]()],
-                           "serverInfo": ["name": "reset", "version": "0.3.15"]])
+                           "serverInfo": ["name": "reset", "version": "0.3.16"]])
         case "tools/list":
             return result(["tools": tools])
         case "tools/call":
@@ -43,7 +44,7 @@ enum MCPServer {
             switch params?["name"] as? String {
             case "get_claude_usage":
                 let budget = Budget.load(from: env.budgetURL)
-                return result(content(usageReport(snapshot: env.snapshot(), budget: budget, now: env.now())))
+                return result(content(usageReport(snapshot: env.snapshot(), budget: budget, now: env.now(), running: env.running())))
             case "set_budget":
                 return result(content(setBudget(args, env: env)))
             case "clear_budget":
@@ -131,7 +132,7 @@ enum MCPServer {
         return out
     }
 
-    static func usageReport(snapshot: WidgetSnapshot?, budget: Budget?, now: Date) -> [String: Any] {
+    static func usageReport(snapshot: WidgetSnapshot?, budget: Budget?, now: Date, running: Bool = true) -> [String: Any] {
         guard let snap = snapshot else {
             var out: [String: Any] = ["error": "Reset isn't running or hasn't written usage yet. Open Reset.app."]
             // The budget is still worth reporting: it lives in its own file and stays true without the app.
@@ -154,6 +155,11 @@ enum MCPServer {
                 claude["minutes_until_reset"] = Int(r.timeIntervalSince(now) / 60)
             }
             if let b = c.blockedUntil, b > now { claude["weekly_limit_until"] = iso.string(from: b) }
+            let weekly = c.weeklyResetsAt.flatMap { $0 > now ? c.weeklyUsed : nil }
+            if let w = weekly, let r = c.weeklyResetsAt {
+                claude["weekly_percent_used"] = Int(w.rounded())
+                claude["weekly_resets_at_local"] = local.string(from: r)
+            }
             // An agent pacing itself should know when these numbers are a guess, and why.
             claude["estimated"] = c.estimate != nil
             if let e = c.estimate { claude["estimate_note"] = e }
@@ -177,6 +183,9 @@ enum MCPServer {
             } else if runsOut != nil || (left ?? 100) < 15 {
                 let when = runsOut.map { " At this pace it runs out around \(local.string(from: $0)), before the reset." } ?? ""
                 out["advice"] = "Window nearly exhausted.\(when) Finish the current step, prefer smaller models for subagents, avoid broad fan-outs until the reset."
+            } else if let w = weekly, w >= 90, let r = c.weeklyResetsAt {
+                // Close to the weekly limit, new 5-hour windows stop helping; that matters more than a budget nudge.
+                out["advice"] = "The weekly limit is \(Int(w.rounded()))% used until \(local.string(from: r)). Save heavy work for after that; prefer smaller models and lean subagents."
             } else if let budget, budgetStatus == .wrapUp {
                 out["advice"] = budget.advice(used: used)
             } else if left == nil {
@@ -186,6 +195,12 @@ enum MCPServer {
             } else {
                 out["advice"] = "Plenty of window left."
             }
+        }
+        // The snapshot outlives the app; numbers from a Reset that has quit are history, not a reading.
+        if !running {
+            out["stale"] = true
+            out["note"] = "Reset isn't running, so these numbers are from \(local.string(from: snap.updated)) and may be out of date. Open Reset.app for current ones."
+            out["advice"] = "Reset isn't running, so how much window is left is unknown. Pace conservatively until it's open again."
         }
         if let budget { out["budget"] = budgetReport(budget, used: used) }
         var cost: [String: Any] = ["last_7_days_usd": usd(snap.weekCost)]

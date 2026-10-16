@@ -15,6 +15,11 @@ struct WindowStatus: Identifiable, Equatable {
         var label: String
         var resetsAt: Date
         var usedPercent: Double?
+
+        /// From here a longer limit is worth a warning: the menu colours it, the status line shows it, and a
+        /// notification says so once. Before, nothing said anything until it was used up.
+        static let warnPercent = 80.0
+        var isHigh: Bool { (usedPercent ?? 0) >= Self.warnPercent }
     }
 
     let id: String

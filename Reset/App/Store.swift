@@ -131,7 +131,7 @@ final class Store {
         now = Date()
         let crossedReset = statuses.contains { s in s.resetsAt.map { $0 <= now } ?? false }
         if crossedReset || now.timeIntervalSince(lastScan) >= 60 { refresh() }
-        if now.timeIntervalSince(lastStatusLine) >= 30 { writeStatusLine() }
+        if now.timeIntervalSince(lastStatusLine) >= 30 { writeStatusLine(); if !Demo.isOn { Heartbeat.beat() } }
         // The MCP server sets budgets from another process; a 5-second look keeps the dashboard current.
         if now.timeIntervalSince(lastBudgetLook) >= 5 { lastBudgetLook = now; reloadBudget() }
         runAutoStarts()
@@ -260,6 +260,9 @@ final class Store {
                     if !list[i].isEstimate, let u = list[i].usedPercent {
                         self.forecast.record(used: u, resetsAt: list[i].resetsAt)
                         self.warnIfRunningOut(list[i])
+                    }
+                    if let sec = list[i].secondary {
+                        self.warnIfWeeklyHigh(list[i].name, sec)
                     }
                 }
                 self.statuses = list
@@ -409,6 +412,7 @@ final class Store {
             parts.append(s)
         }
         if let b = c.blockedUntil, b > Date() { parts.append("weekly limit until \(Fmt.when(b))") }
+        else if let sec = c.secondary, sec.isHigh, let u = sec.usedPercent { parts.append("wk \(Int(u.rounded()))%") }
         if let out = runsOut { parts.append("runs out ~\(Fmt.clock.string(from: out))") }
         if let b = budget { parts.append(b.tag(used: budgetUsed)) }
         let today = usage.calls.filter { Calendar.current.isDateInToday($0.time) }.reduce(0) { $0 + $1.cost }
@@ -416,6 +420,14 @@ final class Store {
         let line = "◷ " + parts.joined(separator: " · ")
         let url = WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("statusline.txt")
         try? line.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// On quit: the status line says so (even the older plain `cat` one), and the heartbeat stops.
+    func markQuit() {
+        guard !Demo.isOn else { return }
+        Heartbeat.stop()
+        let url = WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("statusline.txt")
+        try? "◷ Reset isn't running".write(to: url, atomically: true, encoding: .utf8)
     }
 
     // MARK: Self-test
@@ -615,6 +627,22 @@ final class Store {
         note("Forecast: limit around \(Fmt.clock.string(from: out))")
     }
 
+    /// Once per weekly cycle, when the weekly limit passes 80%: by the time it's used up, a fresh 5-hour window
+    /// no longer helps, and that was the first anyone heard of it.
+    private func warnIfWeeklyHigh(_ name: String, _ sec: WindowStatus.Secondary) {
+        guard sec.isHigh, (sec.usedPercent ?? 0) < 100, sec.resetsAt > Date() else { return }
+        let key = Alerts.minuteKey(sec.resetsAt)
+        // The reset time wobbles a little between readings; within an hour is the same cycle.
+        let warned = UserDefaults.standard.integer(forKey: "weeklyWarnedFor")
+        guard abs(warned - key) > 60 else { return }
+        UserDefaults.standard.set(key, forKey: "weeklyWarnedFor")
+        let title = "\(name): weekly limit \(Int((sec.usedPercent ?? 0).rounded()))% used"
+        let body = "It resets \(Fmt.when(sec.resetsAt)). Once it's used up, new 5-hour windows won't help until then."
+        alerts.notifyNow(title: title, body: body, id: "weekly")
+        if phoneEnabled { alerts.pushNow(title: title, body: body, server: ntfyServer, topic: ntfyTopic, log: note) }
+        note("Weekly limit at \(Int((sec.usedPercent ?? 0).rounded()))%")
+    }
+
     // MARK: Widgets
 
     var lastWidgetData: Data?
@@ -633,7 +661,8 @@ final class Store {
             var available = true
             if case .unavailable = s.state { available = false }
             return .init(id: s.id, name: s.name, resetsAt: s.resetsAt, ready: s.state == .ready, available: available,
-                         used: s.usedPercent, blockedUntil: s.blockedUntil, estimate: estimateNote(for: s))
+                         used: s.usedPercent, blockedUntil: s.blockedUntil, estimate: estimateNote(for: s),
+                         weeklyUsed: s.secondary?.usedPercent, weeklyResetsAt: s.secondary?.resetsAt)
         }
         // 7 days: the week widget counts this week's windows from these (5 undercounted it); the barcode draws its own 5 rows.
         let windows = usage.windows(days: 7).map { WidgetSnapshot.Window(start: $0.start, end: $0.end, autoStart: $0.autoStart, hitLimit: $0.hitLimit) }
@@ -741,8 +770,8 @@ final class Store {
         custom[i].startedAt = nil
     }
 
-    func sendTestPush() {
-        alerts.sendTest(server: ntfyServer, topic: ntfyTopic, log: note)
+    func sendTestPush(result: @escaping (String) -> Void = { _ in }) {
+        alerts.sendTest(server: ntfyServer, topic: ntfyTopic, log: note, result: result)
     }
 
     // MARK: Start now, from a widget
