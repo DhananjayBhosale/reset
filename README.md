@@ -4,7 +4,7 @@
 
 <p align="center">Know exactly when your AI usage window resets, get pinged on your phone when it does, and see what your usage is actually worth.</p>
 
-<p align="center"><a href="https://msfbeast.github.io/reset/"><b>Website</b></a> · <a href="https://github.com/msfbeast/reset/releases/latest"><b>Download</b></a> · <a href="#troubleshooting">Troubleshooting</a></p>
+<p align="center"><a href="https://msfbeast.github.io/reset/"><b>Website</b></a> · <a href="https://github.com/msfbeast/reset/releases/latest"><b>Download</b></a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="CHANGELOG.md">Changelog</a></p>
 
 <p align="center"><img src="docs/share-card.png" width="720" alt="Reset share card"></p>
 
