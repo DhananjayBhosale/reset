@@ -58,7 +58,7 @@ struct SettingsView: View {
             } header: {
                 Text("Claude accuracy")
             } footer: {
-                Text("Turn this on for exact usage and reset times, updated every minute while you're using Claude Code and every 5 minutes otherwise. Without it, Reset estimates from your Claude Code activity and labels its numbers \"estimated\". It reads Claude Code's sign-in from your Keychain (macOS may ask once) and sends it only to api.anthropic.com. Usage numbers only, never chats.")
+                Text("Turn this on for exact usage and reset times, updated every 2 minutes while you're using Claude Code and every 5 minutes otherwise. Without it, Reset estimates from your Claude Code activity and labels its numbers \"estimated\". It reads Claude Code's sign-in from your Keychain (macOS may ask once) and sends it only to api.anthropic.com. Usage numbers only, never chats.")
                     .foregroundStyle(.secondary)
             }
 

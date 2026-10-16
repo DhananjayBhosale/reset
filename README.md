@@ -69,7 +69,7 @@ The first launch opens a short setup guide that covers all of this. You can run 
 
 | Feature | How |
 |---|---|
-| Exact Claude usage | **Settings → General**: turn on **Live usage from your Claude account**. Reset reads the sign-in that the Claude Code CLI stores in your Keychain and asks Anthropic for your current usage every minute while you're using Claude Code, and every 5 minutes otherwise. If it says the sign-in expired, run `claude auth login` once. |
+| Exact Claude usage | **Settings → General**: turn on **Live usage from your Claude account**. Reset reads the sign-in that the Claude Code CLI stores in your Keychain and asks Anthropic for your current usage every 2 minutes while you're using Claude Code, and every 5 minutes otherwise. If it says the sign-in expired, run `claude auth login` once. |
 | Phone alerts | Install the free ntfy app, subscribe to a long random topic name, and enter the same topic under **Settings → General → Phone alerts**. Anyone who knows the topic can read it, so make it unguessable. |
 | Auto-start | **Settings → Automation**: turn on **Auto-start** for Claude. It runs `claude -p "hi" --model haiku` (the command is under Advanced) once when a window you were watching runs out, while the Mac is awake. Each run uses a little of your quota. |
 | Value multiple | Press **Add your plan price** on the dashboard and enter what you pay per month. |

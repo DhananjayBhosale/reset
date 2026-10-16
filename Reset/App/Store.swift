@@ -36,7 +36,8 @@ final class Store {
             refresh()
         }
     }
-    let liveClaude = LiveClaude()
+    /// Its schedule and last reading are saved, so restarts respect a "slow down" (demo mode never touches it).
+    let liveClaude = LiveClaude(scheduleURL: Demo.isOn ? nil : LiveClaude.scheduleURL)
     /// Saved across restarts, except in demo mode, which mustn't touch real files.
     let forecast = Forecast(storeURL: Demo.isOn ? nil : Forecast.defaultURL)
     var look: Look = Look(rawValue: UserDefaults.standard.string(forKey: "look") ?? "") ?? .glow {
@@ -438,7 +439,11 @@ final class Store {
         out["activity"] = Array(log.prefix(10))
         let lastUse = statuses.first { $0.id == "claude" }?.lastActivity
         out["network"] = ["online": network.isOnline]
-        out["livePolling"] = ["lastClaudeActivity": d(lastUse), "intervalSeconds": LiveClaude.interval(lastActivity: lastUse)]
+        let hits = liveClaude.limitHits
+        let dayAgo = Date().addingTimeInterval(-86400)
+        out["livePolling"] = ["lastClaudeActivity": d(lastUse), "intervalSeconds": LiveClaude.interval(lastActivity: lastUse),
+                              "slowDownsLast24h": hits.filter { $0.at > dayAgo }.count,
+                              "slowDowns": hits.suffix(10).map { ["at": iso.string(from: $0.at), "retryAfter": $0.retryAfter.map { $0 as Any } ?? NSNull()] }]
         out["problemReport"] = problemReportURL().flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "body" }?.value } ?? NSNull()
         out["logFormat"] = ["verdict": usage.format.verdict.rawValue, "summary": usage.format.summary,
                             "checked": usage.format.checked, "lines": usage.format.lines, "problems": usage.format.problems]

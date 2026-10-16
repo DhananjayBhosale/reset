@@ -2,9 +2,14 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.10 — gentler on Anthropic's limits
+
+- Live usage remembers when Anthropic asks it to slow down, across restarts and app updates, instead of asking again straight away. After a restart, the last reading shows immediately if it's recent.
+- While you're using Claude Code, live usage now updates every 2 minutes (every 5 when idle). Once a minute could trip Anthropic's rate limit.
+
 ## 0.3.9 — fresher, steadier
 
-- Live usage updates about every minute while you're using Claude Code, and every 5 minutes when idle: fresher numbers when they move, fewer requests overall.
+- Live usage updates more often while you're using Claude Code and every 5 minutes when idle: fresher numbers when they move, fewer requests overall. (Every minute at first; 0.3.10 makes it every 2.)
 - When you're running out, the red pill shows what's left and when it runs out ("86% · out 9:29") instead of a countdown that read like a second clock time.
 - Auto-start and Start now wait for a working network instead of timing out offline and using up their tries.
 - Antigravity's last reading stays visible while the app is closed, labelled with when it was seen.

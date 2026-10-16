@@ -311,10 +311,11 @@ final class ForecastPersistenceTests: XCTestCase {
 final class LivePollTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_772_442_000)
 
-    func testActiveUseFetchesAboutEveryMinute() {
-        XCTAssertEqual(LiveClaude.interval(lastActivity: now.addingTimeInterval(-30), now: now), 55)
-        XCTAssertEqual(LiveClaude.interval(lastActivity: now.addingTimeInterval(-299), now: now), 55)
-        XCTAssertLessThan(LiveClaude.activeInterval, 60, "the app refreshes every 60 s; exactly 60 would sometimes wait two")
+    func testActiveUseFetchesEveryTwoMinutes() {
+        XCTAssertEqual(LiveClaude.interval(lastActivity: now.addingTimeInterval(-30), now: now), 115)
+        XCTAssertEqual(LiveClaude.interval(lastActivity: now.addingTimeInterval(-299), now: now), 115)
+        XCTAssertLessThan(LiveClaude.activeInterval, 120, "the app refreshes every 60 s; exactly 120 would sometimes wait three")
+        XCTAssertGreaterThan(LiveClaude.activeInterval, 60, "once a minute drew a slow-down")
     }
 
     func testIdleFetchesEveryFiveMinutes() {
@@ -350,5 +351,66 @@ final class AntigravityLastSeenTests: XCTestCase {
                                          weeklyResetsAt: now.addingTimeInterval(86400), weeklyUsed: 100, blockedUntil: now.addingTimeInterval(86400))
         let s = try XCTUnwrap(AntigravitySource.lastSeen(c, now: now))
         XCTAssertEqual(s.blockedUntil, now.addingTimeInterval(86400))
+    }
+}
+
+/// Live usage shares one schedule across restarts and copies of the app, so a "slow down" is respected.
+final class LiveScheduleTests: XCTestCase {
+    private var url: URL!
+    private let now = Date(timeIntervalSince1970: 1_772_442_000)
+    override func setUp() { url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-live.json") }
+    override func tearDown() { try? FileManager.default.removeItem(at: url) }
+
+    func testFetchIsDueOnlyAfterTheIntervalAndAnyBackoff() {
+        XCTAssertTrue(LiveClaude.shouldFetch(now: now, lastAttempt: now.addingTimeInterval(-60), backoffUntil: .distantPast, interval: 55))
+        XCTAssertFalse(LiveClaude.shouldFetch(now: now, lastAttempt: now.addingTimeInterval(-30), backoffUntil: .distantPast, interval: 55))
+        XCTAssertFalse(LiveClaude.shouldFetch(now: now, lastAttempt: now.addingTimeInterval(-600), backoffUntil: now.addingTimeInterval(120), interval: 55),
+                       "a slow-down outranks the interval")
+    }
+
+    func testABackoffSurvivesARestartAndNoRequestIsMade() {
+        LiveClaude.saveSchedule(.init(lastAttempt: now.addingTimeInterval(-600), backoffUntil: Date().addingTimeInterval(300)), to: url)
+        // Reset restarts (or a second copy starts) while Anthropic's "slow down" is still in force.
+        let live = LiveClaude(scheduleURL: url)
+        var called = false
+        live.poll(interval: 0) { called = true }
+        XCTAssertEqual(live.state, .off, "it didn't even start a request")
+        XCTAssertFalse(called)
+    }
+
+    func testAFreshReadingIsShownStraightAfterARestart() {
+        let snap = LiveClaude.Snapshot(fiveHour: .init(percent: 35, resetsAt: now.addingTimeInterval(3600)), sevenDay: nil,
+                                       fetchedAt: now.addingTimeInterval(-120))
+        LiveClaude.saveSchedule(.init(lastAttempt: now.addingTimeInterval(-120), lastGood: snap), to: url)
+        let live = LiveClaude(scheduleURL: url, now: now)
+        XCTAssertEqual(live.snapshot, snap, "no drop to an estimate while the next fetch is due")
+        XCTAssertEqual(live.state, .ok(snap.fetchedAt))
+    }
+
+    func testAnOldReadingIsNotRestored() {
+        let snap = LiveClaude.Snapshot(fiveHour: .init(percent: 35, resetsAt: nil), sevenDay: nil, fetchedAt: now.addingTimeInterval(-3600))
+        LiveClaude.saveSchedule(.init(lastGood: snap), to: url)
+        let live = LiveClaude(scheduleURL: url, now: now)
+        XCTAssertNil(live.snapshot)
+        XCTAssertEqual(live.state, .off)
+    }
+
+    func testOlderSchedulesWithoutTheSlowDownLogStillLoad() throws {
+        try #"{"lastAttempt":1772442000,"backoffUntil":0}"#.write(to: url, atomically: true, encoding: .utf8)
+        let s = try XCTUnwrap(LiveClaude.loadSchedule(url))
+        XCTAssertNil(s.limits)
+        XCTAssertEqual(LiveClaude(scheduleURL: url).limitHits, [])
+    }
+
+    func testSlowDownLogIsReadBack() {
+        let hits = [LiveClaude.LimitHit(at: now, retryAfter: 300), LiveClaude.LimitHit(at: now.addingTimeInterval(600), retryAfter: nil)]
+        LiveClaude.saveSchedule(.init(limits: hits), to: url)
+        XCTAssertEqual(LiveClaude(scheduleURL: url).limitHits, hits)
+    }
+
+    func testWithoutAFileNothingIsWritten() {
+        let live = LiveClaude()
+        live.reset()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 }

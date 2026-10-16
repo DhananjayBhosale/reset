@@ -4,8 +4,56 @@ import Foundation
 /// endpoint for the current 5-hour and weekly windows. Only usage numbers are fetched, the token is only
 /// ever sent to api.anthropic.com, and Reset never refreshes or rewrites it (that would sign Claude Code out).
 final class LiveClaude {
-    struct Window { var percent: Double; var resetsAt: Date? }
-    struct Snapshot { var fiveHour: Window?; var sevenDay: Window?; var fetchedAt: Date }
+    struct Window: Codable, Equatable { var percent: Double; var resetsAt: Date? }
+    struct Snapshot: Codable, Equatable { var fiveHour: Window?; var sevenDay: Window?; var fetchedAt: Date }
+
+    /// When Reset last asked, until when Anthropic told it to wait, and the last good reading. Saved to
+    /// live-schedule.json and re-read before every fetch, so a restart (or a second copy of the app) respects a
+    /// "slow down" instead of asking again straight away, and shows the last reading instead of an estimate.
+    struct Schedule: Codable, Equatable {
+        var lastAttempt: Date = .distantPast
+        var backoffUntil: Date = .distantPast
+        var lastGood: Snapshot?
+        /// Every "slow down" (HTTP 429) received, newest last, to learn where Anthropic's undocumented limit sits.
+        /// Optional so schedules saved before it existed still load.
+        var limits: [LimitHit]? = nil
+    }
+
+    /// One "slow down": when, and how long Anthropic asked Reset to wait (its Retry-After header), if it said.
+    struct LimitHit: Codable, Equatable {
+        var at: Date
+        var retryAfter: Double?
+    }
+
+    /// Only the most recent hits are kept; enough to see a pattern over a few days.
+    static let keptLimitHits = 50
+
+    /// The saved "slow down" log, for the self-test.
+    var limitHits: [LimitHit] { Self.loadSchedule(scheduleURL)?.limits ?? [] }
+
+    /// A reading older than this says nothing about the current window; matches what `apply` accepts.
+    static let freshFor: TimeInterval = 15 * 60
+
+    static var scheduleURL: URL { WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("live-schedule.json") }
+
+    static func loadSchedule(_ url: URL?) -> Schedule? {
+        guard let url, let d = try? Data(contentsOf: url) else { return nil }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .secondsSince1970
+        return try? dec.decode(Schedule.self, from: d)
+    }
+
+    static func saveSchedule(_ s: Schedule, to url: URL?) {
+        guard let url else { return }
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .secondsSince1970
+        guard let d = try? enc.encode(s) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? d.write(to: url, options: .atomic)
+    }
+
+    /// Whether a fetch is due: the interval has passed since the last attempt, and any back-off is over.
+    static func shouldFetch(now: Date, lastAttempt: Date, backoffUntil: Date, interval: TimeInterval) -> Bool {
+        now.timeIntervalSince(lastAttempt) >= interval && now >= backoffUntil
+    }
 
     enum State: Equatable {
         case off, loading
@@ -20,12 +68,34 @@ final class LiveClaude {
     private var lastAttempt = Date.distantPast
     private var backoffUntil = Date.distantPast
     private let lock = NSLock()
+    private let scheduleURL: URL?
 
-    /// How often to ask: about once a minute while Claude Code is in use, when the numbers move and you're
-    /// watching them, and every 5 minutes otherwise. Fewer requests overall than a flat 3 minutes, to an
-    /// endpoint that isn't a public API. Just under 60 s, because the app's own refresh runs every 60 s and a
-    /// strict 60 would sometimes miss a tick and wait two.
-    static let activeInterval: TimeInterval = 55, idleInterval: TimeInterval = 300
+    /// With no `scheduleURL` nothing is read or written (tests).
+    init(scheduleURL: URL? = nil, now: Date = Date()) {
+        self.scheduleURL = scheduleURL
+        guard let saved = Self.loadSchedule(scheduleURL) else { return }
+        lastAttempt = saved.lastAttempt
+        backoffUntil = saved.backoffUntil
+        if let good = saved.lastGood, now.timeIntervalSince(good.fetchedAt) < Self.freshFor {
+            snapshot = good
+            state = .ok(good.fetchedAt)
+        }
+    }
+
+    /// Saves the schedule, keeping whatever is latest on disk (another copy of the app may have asked since).
+    private func persist(_ update: (inout Schedule) -> Void) {
+        guard scheduleURL != nil else { return }
+        var s = Self.loadSchedule(scheduleURL) ?? Schedule()
+        update(&s)
+        Self.saveSchedule(s, to: scheduleURL)
+    }
+
+    /// How often to ask: every 2 minutes while Claude Code is in use, when the numbers move and you're watching
+    /// them, and every 5 minutes otherwise. Once a minute drew Anthropic's first "slow down" within 40 minutes
+    /// (alongside a lot of restarts), and the endpoint isn't a public API with a published limit, so 2 minutes it
+    /// is until the 429 log says more is safe. Just under 120 s, because the app's refresh runs every 60 s and a
+    /// strict 120 would sometimes miss a tick and wait three.
+    static let activeInterval: TimeInterval = 115, idleInterval: TimeInterval = 300
     static let activeWindow: TimeInterval = 5 * 60
 
     static func interval(lastActivity: Date?, now: Date = Date()) -> TimeInterval {
@@ -37,9 +107,15 @@ final class LiveClaude {
     func poll(interval: TimeInterval = 180, done: @escaping () -> Void) {
         lock.lock()
         let now = Date()
-        guard now.timeIntervalSince(lastAttempt) >= interval, now >= backoffUntil else { lock.unlock(); return }
+        // Whatever another copy (or this one before a restart) recorded counts too.
+        if let disk = Self.loadSchedule(scheduleURL) {
+            lastAttempt = max(lastAttempt, disk.lastAttempt)
+            backoffUntil = max(backoffUntil, disk.backoffUntil)
+        }
+        guard Self.shouldFetch(now: now, lastAttempt: lastAttempt, backoffUntil: backoffUntil, interval: interval) else { lock.unlock(); return }
         lastAttempt = now
         lock.unlock()
+        persist { $0.lastAttempt = now }
         if snapshot == nil { state = .loading }
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -66,8 +142,14 @@ final class LiveClaude {
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                 if let err { self.finish(.problem("Couldn't reach Anthropic: \(err.localizedDescription)"), done); return }
                 if code == 429 {
-                    let retry = (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? 600
-                    self.lock.lock(); self.backoffUntil = Date().addingTimeInterval(max(retry, 300)); self.lock.unlock()
+                    let header = (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init)
+                    let retry = header ?? 600
+                    let until = Date().addingTimeInterval(max(retry, 300))
+                    self.lock.lock(); self.backoffUntil = until; self.lock.unlock()
+                    self.persist {
+                        $0.backoffUntil = until
+                        $0.limits = Array((($0.limits ?? []) + [LimitHit(at: Date(), retryAfter: header)]).suffix(Self.keptLimitHits))
+                    }
                     self.finish(.problem("Anthropic asked Reset to slow down; trying again in a few minutes"), done)
                     return
                 }
@@ -80,6 +162,7 @@ final class LiveClaude {
                     return
                 }
                 let snap = Snapshot(fiveHour: Self.window(obj["five_hour"]), sevenDay: Self.window(obj["seven_day"]), fetchedAt: Date())
+                self.persist { $0.lastGood = snap }
                 // Diagnostics: the usage windows exactly as received (percentages and reset times only).
                 var diag: [String: Any] = ["fetched": ISO8601DateFormatter().string(from: Date())]
                 for k in ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"] { diag[k] = obj[k] ?? NSNull() }
@@ -100,13 +183,17 @@ final class LiveClaude {
 
     /// Fetch again right away, e.g. after the user signs Claude Code back in.
     func retryNow(done: @escaping () -> Void) {
+        // Asked for by the user (after signing in), so it overrides the schedule, saved one included.
         lock.lock(); lastAttempt = .distantPast; backoffUntil = .distantPast; lock.unlock()
+        persist { $0.lastAttempt = .distantPast; $0.backoffUntil = .distantPast }
         poll(interval: 0, done: done)
     }
 
     func reset() {
         needsSignIn = false
         lock.lock(); lastAttempt = .distantPast; backoffUntil = .distantPast; lock.unlock()
+        // Switched off: forget the last reading too, so switching back on never shows something stale.
+        persist { $0.lastGood = nil }
         snapshot = nil
         state = .off
     }
