@@ -108,7 +108,7 @@ struct OnboardingView: View {
 
     private var claude: some View {
         VStack(alignment: .leading, spacing: 16) {
-            header("Exact Claude usage", "With this on, Reset shows your real usage % and the exact reset time instead of an estimate. It asks Anthropic every 3 minutes using Claude Code's own sign-in, and sends it nowhere else.")
+            header("Exact Claude usage", "With this on, Reset shows your real usage % and the exact reset time instead of an estimate. It asks Anthropic every minute while you're using Claude Code (every 5 minutes otherwise) with Claude Code's own sign-in, and sends it nowhere else.")
             HStack(spacing: 12) {
                 Image(systemName: cliIcon).font(.system(size: 22)).foregroundStyle(cliColor)
                 VStack(alignment: .leading, spacing: 2) {

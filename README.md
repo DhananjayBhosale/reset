@@ -12,7 +12,7 @@ Everything it reads stays on your Mac.
 
 ## What it does
 
-- **Your window at a glance.** A colored pill in the menu bar: orange "2:46 · 42%" as usual, red when the window is nearly empty or your pace runs out before the reset ("2:00 · out 11:19"), green "ready" when a fresh window is waiting. Exact when live usage is on; estimated from your activity when it isn't, and labelled as such.
+- **Your window at a glance.** A colored pill in the menu bar: orange "2:46 · 42%" as usual, red when the window is nearly empty or your pace runs out before the reset ("38% · out 10:07": 38% left, empty at 10:07 at this pace), green "ready" when a fresh window is waiting. Exact when live usage is on; estimated from your activity when it isn't, and labelled as such.
 - **Phone alerts while your Mac sleeps.** Reset queues each reset alert on an [ntfy](https://ntfy.sh) server ahead of time, so it arrives on your phone even with the lid closed.
 - **Limit forecast.** At your current pace, will you hit the limit before the reset? Reset warns you once per window, on your Mac and your phone.
 - **Auto-start.** Optional. When a window runs out, Reset sends a one-word prompt so the next window starts right away instead of when you wake up.
@@ -67,7 +67,7 @@ The first launch opens a short setup guide that covers all of this. You can run 
 
 | Feature | How |
 |---|---|
-| Exact Claude usage | **Settings → General**: turn on **Live usage from your Claude account**. Reset reads the sign-in that the Claude Code CLI stores in your Keychain and asks Anthropic for your current usage every 3 minutes. If it says the sign-in expired, run `claude auth login` once. |
+| Exact Claude usage | **Settings → General**: turn on **Live usage from your Claude account**. Reset reads the sign-in that the Claude Code CLI stores in your Keychain and asks Anthropic for your current usage every minute while you're using Claude Code, and every 5 minutes otherwise. If it says the sign-in expired, run `claude auth login` once. |
 | Phone alerts | Install the free ntfy app, subscribe to a long random topic name, and enter the same topic under **Settings → General → Phone alerts**. Anyone who knows the topic can read it, so make it unguessable. |
 | Auto-start | **Settings → Automation**: turn on **Auto-start** for Claude. It runs `claude -p "hi" --model haiku` (the command is under Advanced) once when a window you were watching runs out, while the Mac is awake. Each run uses a little of your quota. |
 | Value multiple | Press **Add your plan price** on the dashboard and enter what you pay per month. |

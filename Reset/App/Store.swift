@@ -213,6 +213,17 @@ final class Store {
             lastRefresh = Date()
             now = Date()
             mascots.sync()
+            // `-renderMenu` works in demo mode too, for screenshots with made-up numbers (after the usage loads).
+            if let path = UserDefaults.standard.string(forKey: "renderMenu"), !renderedMenu {
+                renderedMenu = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in
+                    let r = ImageRenderer(content: MenuView(store: self)); r.scale = 2
+                    if let img = r.nsImage, let t = img.tiffRepresentation,
+                       let png = NSBitmapImageRep(data: t)?.representation(using: .png, properties: [:]) {
+                        try? png.write(to: URL(fileURLWithPath: path))
+                    }
+                }
+            }
             return
         }
         // One scan at a time; a request during a scan runs once more afterwards with fresh inputs.
@@ -235,7 +246,7 @@ final class Store {
                 var list = list
                 if self.liveClaudeEnabled, let i = list.firstIndex(where: { $0.id == "claude" }) {
                     self.liveClaude.apply(to: &list[i], now: Date())
-                    self.liveClaude.poll { [weak self] in self?.refresh() }
+                    self.liveClaude.poll(interval: LiveClaude.interval(lastActivity: list[i].lastActivity)) { [weak self] in self?.refresh() }
                     if !list[i].isEstimate, let u = list[i].usedPercent {
                         self.forecast.record(used: u, resetsAt: list[i].resetsAt)
                         self.warnIfRunningOut(list[i])
@@ -416,6 +427,8 @@ final class Store {
         out["autoStartLog"] = kickLog.suffix(5).map { ["id": $0.id, "time": iso.string(from: $0.time), "kind": $0.kind, "summary": $0.summary] }
         out["autoStartNeedsSignIn"] = autoStartNeedsSignIn
         out["activity"] = Array(log.prefix(10))
+        let lastUse = statuses.first { $0.id == "claude" }?.lastActivity
+        out["livePolling"] = ["lastClaudeActivity": d(lastUse), "intervalSeconds": LiveClaude.interval(lastActivity: lastUse)]
         out["problemReport"] = problemReportURL().flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "body" }?.value } ?? NSNull()
         out["logFormat"] = ["verdict": usage.format.verdict.rawValue, "summary": usage.format.summary,
                             "checked": usage.format.checked, "lines": usage.format.lines, "problems": usage.format.problems]

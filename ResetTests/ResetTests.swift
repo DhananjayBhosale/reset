@@ -306,3 +306,19 @@ final class ForecastPersistenceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 }
+
+/// Live usage is fetched often while Claude Code is in use and rarely when it isn't.
+final class LivePollTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_772_442_000)
+
+    func testActiveUseFetchesAboutEveryMinute() {
+        XCTAssertEqual(LiveClaude.interval(lastActivity: now.addingTimeInterval(-30), now: now), 55)
+        XCTAssertEqual(LiveClaude.interval(lastActivity: now.addingTimeInterval(-299), now: now), 55)
+        XCTAssertLessThan(LiveClaude.activeInterval, 60, "the app refreshes every 60 s; exactly 60 would sometimes wait two")
+    }
+
+    func testIdleFetchesEveryFiveMinutes() {
+        XCTAssertEqual(LiveClaude.interval(lastActivity: now.addingTimeInterval(-301), now: now), 300)
+        XCTAssertEqual(LiveClaude.interval(lastActivity: nil, now: now), 300, "no activity seen at all")
+    }
+}

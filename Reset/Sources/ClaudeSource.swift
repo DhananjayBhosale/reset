@@ -43,6 +43,7 @@ struct ClaudeSource: WindowSource {
         }
 
         let activity = events.filter { $0.kind == .activity }.map(\.time)
+        status.lastActivity = activity.last { $0 <= now }
         let result = Self.compute(events: events, activity: activity, now: now)
         if let w = result.window {
             status.state = .active(resetsAt: w.end)

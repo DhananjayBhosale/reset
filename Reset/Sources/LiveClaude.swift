@@ -21,6 +21,18 @@ final class LiveClaude {
     private var backoffUntil = Date.distantPast
     private let lock = NSLock()
 
+    /// How often to ask: about once a minute while Claude Code is in use, when the numbers move and you're
+    /// watching them, and every 5 minutes otherwise. Fewer requests overall than a flat 3 minutes, to an
+    /// endpoint that isn't a public API. Just under 60 s, because the app's own refresh runs every 60 s and a
+    /// strict 60 would sometimes miss a tick and wait two.
+    static let activeInterval: TimeInterval = 55, idleInterval: TimeInterval = 300
+    static let activeWindow: TimeInterval = 5 * 60
+
+    static func interval(lastActivity: Date?, now: Date = Date()) -> TimeInterval {
+        guard let a = lastActivity, now.timeIntervalSince(a) < activeWindow else { return idleInterval }
+        return activeInterval
+    }
+
     /// Fetch if the last one is older than `interval`. Calls `done` on the main queue when something changed.
     func poll(interval: TimeInterval = 180, done: @escaping () -> Void) {
         lock.lock()

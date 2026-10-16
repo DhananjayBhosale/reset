@@ -33,9 +33,12 @@ struct MenuBarGlance: Equatable {
         guard let s = soonest, let reset = s.resetsAt else { return nil }
         let countdown = prefix(s) + Fmt.short(reset.timeIntervalSince(now))
         let warn = signedOut && s.id == "claude"
-        // The forecast is Claude's, and only counts when it lands before this window's reset.
+        // The forecast is Claude's, and only counts when it lands before this window's reset. Then what's left and
+        // when it runs out matter more than the reset countdown, and a countdown next to a clock time ("4:42 · out
+        // 9:29") read as two clock times; so it's "86% · out 9:29", and the reset time is a click away in the menu.
         if s.id == "claude", let out = runsOutAt, out > now, out < reset {
-            return MenuBarGlance(tone: .runningOut, text: "\(countdown) · out \(shortClock.string(from: out))", warning: warn)
+            let lead = s.usedPercent.map { "\(Int(max(0, 100 - $0).rounded()))%" } ?? countdown
+            return MenuBarGlance(tone: .runningOut, text: "\(lead) · out \(shortClock.string(from: out))", warning: warn)
         }
         guard let used = s.usedPercent else {
             // No usage reading: the countdown alone, rather than a percentage that would really be the clock.

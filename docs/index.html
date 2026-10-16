@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reset: your Claude Code window at a glance</title>
+<meta name="description" content="A free, open-source Mac menu bar app for Claude Code: a countdown to your next 5-hour window, a warning before you run out, phone alerts at the reset, and optional auto-start. Everything stays on your Mac.">
+<meta property="og:title" content="Reset: your Claude Code window at a glance">
+<meta property="og:description" content="Countdown to your next 5-hour window, a warning before you run out, phone alerts at the reset. Free and open source for macOS.">
+<meta property="og:image" content="https://msfbeast.github.io/reset/widgets.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="icon.png">
+<style>
+  :root {
+    --bg: #0b0b0c; --panel: #141416; --panel2: #1b1b1e; --line: rgba(255,255,255,.08);
+    --text: #f2f2f3; --dim: rgba(255,255,255,.62); --faint: rgba(255,255,255,.4);
+    --orange: #ff9e42; --red: #ff4d47; --green: #4cd96b;
+    --radius: 22px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 17px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  a { color: var(--orange); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 88px 0; border-top: 1px solid var(--line); }
+  h1, h2, h3 { line-height: 1.15; margin: 0; letter-spacing: -0.02em; }
+  h2 { font-size: 40px; }
+  h3 { font-size: 19px; }
+  .lead { color: var(--dim); font-size: 20px; max-width: 640px; }
+  .eyebrow { color: var(--orange); font-weight: 600; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 14px; }
+  img { max-width: 100%; display: block; }
+
+  /* Top bar */
+  nav { position: sticky; top: 0; z-index: 10; background: rgba(11,11,12,.8); backdrop-filter: saturate(160%) blur(14px);
+        border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; gap: 22px; height: 58px; }
+  nav .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 650; }
+  nav .brand img { width: 26px; height: 26px; }
+  nav .links { margin-left: auto; display: flex; gap: 22px; font-size: 15px; }
+  nav .links a { color: var(--dim); }
+  nav .links a:hover { color: var(--text); text-decoration: none; }
+
+  /* Hero */
+  .hero { padding: 84px 0 64px; text-align: center; border-top: 0;
+          background: radial-gradient(900px 420px at 50% 0%, rgba(255,158,66,.18), transparent 70%); }
+  .hero img.icon { width: 104px; height: 104px; margin: 0 auto 26px; }
+  .hero h1 { font-size: 64px; }
+  .hero .lead { margin: 18px auto 0; }
+  .buttons { display: flex; gap: 12px; justify-content: center; margin-top: 34px; flex-wrap: wrap; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 22px; border-radius: 999px; font-weight: 600; font-size: 16px; }
+  .btn.primary { background: var(--orange); color: #111; }
+  .btn.ghost { border: 1px solid rgba(255,255,255,.18); color: var(--text); }
+  .btn:hover { text-decoration: none; filter: brightness(1.06); }
+  .fine { color: var(--faint); font-size: 14px; margin-top: 14px; }
+
+  /* Fake menu bar with the live pill */
+  .menubar { margin: 52px auto 0; max-width: 560px; height: 34px; border-radius: 10px; background: #1d1d20;
+             border: 1px solid var(--line); display: flex; align-items: center; justify-content: flex-end; gap: 18px;
+             padding: 0 16px; font-size: 14px; color: var(--text); }
+  .menubar .sym { opacity: .85; }
+  .pill { font-weight: 650; font-variant-numeric: tabular-nums; font-size: 14px; padding: 3px 10px; border-radius: 999px;
+          transition: background .35s ease, color .35s ease; white-space: nowrap; }
+  .pill.normal { background: var(--orange); color: #111; }
+  .pill.out { background: var(--red); color: #fff; }
+  .pill.ready { background: var(--green); color: #111; }
+  .pillcap { color: var(--dim); font-size: 15px; margin-top: 14px; min-height: 24px; }
+
+  .shot { margin: 46px auto 0; max-width: 420px; border-radius: 18px; overflow: hidden;
+          box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px var(--line); }
+
+  /* Feature grid */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 44px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; }
+  .card p { color: var(--dim); margin: 10px 0 0; font-size: 16px; }
+  .card .k { font-size: 26px; margin-bottom: 12px; }
+
+  /* Two-column feature rows */
+  .row { display: grid; grid-template-columns: 1fr 1.15fr; gap: 56px; align-items: center; margin-top: 30px; }
+  .row.flip > :first-child { order: 2; }
+  .row p { color: var(--dim); }
+  .row ul { color: var(--dim); padding-left: 20px; }
+  .row li { margin: 6px 0; }
+  .framed { border-radius: 18px; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.55), 0 0 0 1px var(--line); }
+
+  .code { display: grid; gap: 16px; max-width: 860px; }
+  pre { background: #101012; border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; overflow-x: auto;
+        font: 13.5px/1.6 ui-monospace, "SF Mono", Menlo, monospace; color: #e6e6e6; margin: 0; }
+  pre .c { color: var(--faint); } pre .o { color: var(--orange); } pre .g { color: var(--green); }
+
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 30px 0 0; display: grid; gap: 14px; max-width: 720px; }
+  .steps li { counter-increment: s; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px 18px 62px; position: relative; color: var(--dim); }
+  .steps li::before { content: counter(s); position: absolute; left: 20px; top: 16px; width: 28px; height: 28px; border-radius: 50%;
+                      background: rgba(255,158,66,.16); color: var(--orange); font-weight: 700; display: grid; place-items: center; font-size: 15px; }
+  .steps strong { color: var(--text); }
+  code { font: 14px ui-monospace, "SF Mono", Menlo, monospace; background: rgba(255,255,255,.07); padding: 2px 6px; border-radius: 6px; color: #eee; }
+
+  .privacy { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; margin-top: 36px; }
+  .faq details { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; margin-top: 12px; }
+  .faq summary { cursor: pointer; font-weight: 600; }
+  .faq details p { color: var(--dim); margin: 10px 0 0; }
+
+  footer { border-top: 1px solid var(--line); padding: 40px 0 60px; color: var(--faint); font-size: 14px; }
+  footer .wrap { display: flex; gap: 24px; flex-wrap: wrap; justify-content: space-between; }
+
+  @media (max-width: 860px) {
+    .grid, .privacy { grid-template-columns: 1fr; }
+    .row { grid-template-columns: 1fr; gap: 26px; }
+    .row.flip > :first-child { order: 0; }
+    .hero h1 { font-size: 46px; }
+    h2 { font-size: 32px; }
+    nav .links a.hide-sm { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .pill { transition: none; } html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="icon.png" alt="">Reset</a>
+    <div class="links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#claude-code">Claude Code</a>
+      <a class="hide-sm" href="#privacy">Privacy</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/msfbeast/reset">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <img class="icon" src="icon.png" alt="Reset app icon">
+    <h1>Your Claude Code window,<br>at a glance.</h1>
+    <p class="lead">A free, open-source Mac menu bar app that counts down to your next 5-hour window, warns you before you run out, and pings your phone when it resets.</p>
+    <div class="buttons">
+      <a class="btn primary" href="https://github.com/msfbeast/reset/releases/latest">Download for Mac</a>
+      <a class="btn ghost" href="https://github.com/msfbeast/reset">View on GitHub</a>
+    </div>
+    <p class="fine">macOS 14 or later · MIT licensed · everything stays on your Mac</p>
+
+    <div class="menubar" aria-label="Menu bar showing Reset">
+      <svg class="sym" width="17" height="13" viewBox="0 0 17 13" aria-hidden="true"><path fill="currentColor" d="M8.5 2.6c2.4 0 4.6.9 6.3 2.5l1.3-1.3A10.6 10.6 0 0 0 8.5.8C5.6.8 2.9 1.9.9 3.8l1.3 1.3A8.8 8.8 0 0 1 8.5 2.6Zm0 3.6c1.4 0 2.7.5 3.7 1.5l1.3-1.3a7 7 0 0 0-10 0l1.3 1.3c1-1 2.3-1.5 3.7-1.5Zm0 3.6c.5 0 1 .2 1.2.5L8.5 12 6.8 10.3c.3-.3.7-.5 1.7-.5Z"/></svg>
+      <span class="pill normal" id="pill">2:46 · 42%</span>
+      <svg class="sym" width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".6" y=".6" width="21" height="10.8" rx="3" fill="none" stroke="currentColor" stroke-opacity=".55" stroke-width="1.2"/><rect x="2.4" y="2.4" width="13.5" height="7.2" rx="1.6" fill="currentColor"/><path d="M23.2 4.2v3.6c.9-.3 1.4-1 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" fill-opacity=".55"/></svg>
+      <span>Thu 9:41 PM</span>
+    </div>
+    <p class="pillcap" id="pillcap">Orange: 2 hours 46 minutes until the reset, 42% of the window left.</p>
+
+    <div class="shot"><img src="menu.png" alt="Reset's menu: countdown card, budget, today's spend, 7-day spend, value multiple, and today's windows"></div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow">What it does</div>
+    <h2>Never get cut off mid-task again.</h2>
+    <p class="lead">Claude Code gives you a 5-hour usage window. Reset shows where you are in it, whether you'll make it to the reset, and starts the next one for you.</p>
+    <div class="grid">
+      <div class="card"><div class="k">⏱</div><h3>At a glance</h3><p>A colored pill in the menu bar: orange as usual, red when you're nearly out or your pace runs out first, green when a fresh window is waiting.</p></div>
+      <div class="card"><div class="k">🔥</div><h3>Will I make it?</h3><p>Reset projects your pace and tells you when you'd run out, and how much to slow down to reach the reset.</p></div>
+      <div class="card"><div class="k">📱</div><h3>Phone alerts</h3><p>A ping at the reset through the free ntfy app, queued ahead of time so it arrives even with your Mac asleep.</p></div>
+      <div class="card"><div class="k">⚡</div><h3>Auto-start</h3><p>Optional: when a window runs out, Reset sends one short message so the next one starts right away. Or press Start now in a widget.</p></div>
+      <div class="card"><div class="k">📊</div><h3>What it's worth</h3><p>A dashboard with the API-price value of your usage against your plan, cache savings, every window this week, and cost per project.</p></div>
+      <div class="card"><div class="k">🔒</div><h3>Private by design</h3><p>Reads local logs only. No accounts, no analytics, no servers. Anything that leaves your Mac is opt-in.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="row">
+      <div>
+        <div class="eyebrow">The Fuse</div>
+        <h2>See where your pace runs out.</h2>
+        <p>The Fuse widget draws your window as a burning fuse from its start to its reset. If today's pace runs out first, a red flag marks the spot, with how much to slow down to make it.</p>
+        <p>Eight widgets in all: the Fuse, a countdown with your mascot, a gauge, when your next window arrives, today's spend against yesterday, a month calendar, your week, and a Game Boy. The countdown and Fuse get a <strong>Start now</strong> button when a fresh window is waiting.</p>
+      </div>
+      <div class="framed"><img src="fuse.png" alt="Fuse widget: runs out 10:34 PM, 36 minutes before the reset, slow down 25% to make it"></div>
+    </div>
+    <div style="margin-top:56px" class="framed"><img src="widgets.png" alt="All eight Reset widgets"></div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="row flip">
+      <div>
+        <div class="eyebrow">Dashboard</div>
+        <h2>Know what your usage is worth.</h2>
+        <ul>
+          <li>Your live session window, and how much of it is used</li>
+          <li>API-price value of your tokens against what you pay</li>
+          <li>Every 5-hour window of the week: yours, auto-started, and the ones that hit the limit</li>
+          <li>Token mix, when you build, cost per session and per project</li>
+          <li>A share card of your month for X</li>
+        </ul>
+      </div>
+      <div class="framed"><img src="dashboard.png" alt="Reset dashboard with the session window, value multiple and a week of windows"></div>
+    </div>
+  </div>
+</section>
+
+<section id="claude-code">
+  <div class="wrap">
+    <div class="eyebrow">For Claude Code</div>
+    <h2>Let Claude pace itself.</h2>
+    <p class="lead">An MCP server tells Claude how much window is left, and lets it set a budget for a task: wrap up at 80% of the cap, switch to a smaller model past it. A status line keeps the numbers in your terminal.</p>
+    <div class="code" style="margin-top:36px">
+      <pre><span class="c"># Your terminal's status line</span>
+◷ Claude 42% left · 2h 46m to 11:15 PM · <span class="o">budget 70%</span> · $22 today
+
+<span class="c"># Claude, mid-task, via the MCP server</span>
+get_claude_usage → <span class="g">"Within budget for “Refactor auth”: 30% of the window used, cap 70%."</span></pre>
+      <pre><span class="c"># One command to connect it</span>
+claude mcp add --scope user reset -- \
+  /Applications/Reset.app/Contents/MacOS/reset-mcp
+
+<span class="c"># Tools</span>
+get_claude_usage   set_budget   clear_budget</pre>
+    </div>
+  </div>
+</section>
+
+<section id="privacy">
+  <div class="wrap">
+    <div class="eyebrow">Privacy</div>
+    <h2>Your logs stay on your Mac.</h2>
+    <p class="lead">Reset reads Claude Code's local transcripts and keeps only token counts, models, times, tool names, project folders and session titles. Never your prompts or Claude's replies.</p>
+    <div class="privacy">
+      <div class="card"><h3>Only if you turn it on</h3><p><strong>Live usage</strong> sends Claude Code's own sign-in to api.anthropic.com to read your exact usage. <strong>Phone alerts</strong> send reset times to your ntfy server. That's it.</p></div>
+      <div class="card"><h3>No accounts, no analytics</h3><p>Reset runs no servers of its own. A daily update check asks GitHub whether a newer version exists, and you can switch it off. The code is MIT licensed and all on GitHub.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="eyebrow">Install</div>
+    <h2>Up and running in a minute.</h2>
+    <ol class="steps">
+      <li><strong>Download</strong> the latest <code>Reset-x.y.z.dmg</code> from <a href="https://github.com/msfbeast/reset/releases/latest">GitHub releases</a>, open it and drag Reset to Applications.</li>
+      <li><strong>First launch:</strong> Reset isn't notarized yet, so open it once, close the warning, then go to System Settings → Privacy &amp; Security and click <strong>Open Anyway</strong>. Only once.</li>
+      <li><strong>Follow the setup guide:</strong> pick your tools, sign Claude Code in for exact usage, and scan a QR code for phone alerts.</li>
+      <li><strong>Want the widgets?</strong> They need a signed build for now: build it yourself with a free Apple ID (see the <a href="https://github.com/msfbeast/reset#install">README</a>).</li>
+    </ol>
+
+    <div class="faq" style="margin-top:44px">
+      <h3>Questions</h3>
+      <details><summary>Why does it say "estimated"?</summary><p>Without live usage, Reset estimates from your Claude Code activity and says so. Turn on Settings → General → Live usage for exact numbers.</p></details>
+      <details><summary>Does it work with Codex, Gemini CLI or Antigravity?</summary><p>Yes: Codex reads its own session logs, Gemini CLI resets at midnight Pacific, and Antigravity reads its local server while the app is open. You can also add any tool with a manual countdown.</p></details>
+      <details><summary>Does auto-start use my quota?</summary><p>A tiny bit: one short message to the cheapest model per window. It only runs for a window Reset watched run out, never when you switch it on.</p></details>
+      <details><summary>Something's not right.</summary><p>See <a href="https://github.com/msfbeast/reset#troubleshooting">Troubleshooting</a>, or use Settings → Advanced → Report a problem. It pre-fills a GitHub issue with versions and on/off states only, and you see it all before sending.</p></details>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Reset · free and open source under the MIT license · <a href="https://github.com/msfbeast/reset">GitHub</a></span>
+    <span>Not affiliated with Anthropic, OpenAI or Google. The mascots are unofficial fan art.</span>
+  </div>
+</footer>
+
+<script>
+  // The menu bar pill, cycling through what Reset shows. Stays put if the visitor prefers reduced motion.
+  const states = [
+    ["normal", "2:46 · 42%", "Orange: 2 hours 46 minutes until the reset, 42% of the window left."],
+    ["out", "38% · out 10:07", "Red: 38% left, but at today's pace you'd run out at 10:07, before the reset."],
+    ["out", "0:24 · 9%", "Red: almost empty, 9% left with 24 minutes to go."],
+    ["ready", "ready", "Green: a fresh window is waiting. Start it now, or with your next message."],
+  ];
+  const pill = document.getElementById("pill"), cap = document.getElementById("pillcap");
+  let i = 0;
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    setInterval(() => {
+      i = (i + 1) % states.length;
+      const [tone, text, caption] = states[i];
+      pill.className = "pill " + tone; pill.textContent = text; cap.textContent = caption;
+    }, 2600);
+  }
+</script>
+</body>
+</html>

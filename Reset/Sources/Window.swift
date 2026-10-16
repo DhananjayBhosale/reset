@@ -32,6 +32,8 @@ struct WindowStatus: Identifiable, Equatable {
     var blockedUntil: Date? = nil
     /// When `usedPercent` was measured, if it is not live.
     var usageAsOf: Date? = nil
+    /// The most recent real API response seen in this tool's logs, for pacing how often live usage is fetched.
+    var lastActivity: Date? = nil
 
     var resetsAt: Date? {
         if case .active(let d) = state { return d }

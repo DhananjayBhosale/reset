@@ -33,9 +33,12 @@ final class MenuBarGlanceTests: XCTestCase {
     }
 
     func testPaceRunningOutBeforeTheResetTurnsRedWithTheTime() {
-        let g = glance(soonest: active(2 * 3600), out: 52 * 60)
+        let g = glance(soonest: active(2 * 3600, used: 14), out: 52 * 60)
         XCTAssertEqual(g?.tone, .runningOut)
-        XCTAssertTrue(g?.text.hasPrefix("2:00 · out ") == true)
+        XCTAssertTrue(g?.text.hasPrefix("86% · out ") == true, "what's left and when it runs out, not the reset countdown")
+        XCTAssertFalse(g?.text.contains("2:00") == true)
+        XCTAssertTrue(glance(soonest: active(2 * 3600, used: nil), out: 52 * 60)?.text.hasPrefix("2:00 · out ") == true,
+                      "without a usage reading it falls back to the countdown")
         XCTAssertEqual(glance(soonest: active(3600), out: 7200)?.tone, .normal, "running out after the reset doesn't matter")
     }
 
