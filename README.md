@@ -146,6 +146,15 @@ No analytics, no accounts, no servers of its own.
 
 The unit tests cover pricing, de-duplication, incremental parsing, window estimates, the forecast, project grouping, update checks, the MCP server's JSON-RPC round-trips and budgets, and the format-drift check below.
 
+### UI snapshots
+
+```bash
+./scripts/snapshots.sh            # compare
+./scripts/snapshots.sh --record   # rewrite the references after an intended change
+```
+
+Draws the dashboard hero at three widths and in its main states, the menu bar pill and every widget look, with made-up numbers, and compares them pixel by pixel with the images in `Fixtures/snapshots`. A layout slip like the arc running through the countdown fails the suite; a failure saves the actual image and a diff (changed pixels in red) to the temporary folder. Rendering shifts slightly between macOS versions, so record the references on the Mac that runs the tests.
+
 ### Format-drift check
 
 ```bash

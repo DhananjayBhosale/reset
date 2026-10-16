@@ -109,6 +109,7 @@ struct ClaudeSource: WindowSource {
                        canAutoStart: Bool) -> WindowStatus {
         var status = WindowStatus(id: id, name: name, state: .ready, usedPercent: nil, isEstimate: true,
                                   source: "Estimated from Claude Code activity", secondary: nil, canAutoStart: canAutoStart)
+        status.account = org
         let activity = events.filter { $0.kind == .activity }.map(\.time)
         status.lastActivity = activity.last { $0 <= now }
         let result = compute(events: events, activity: activity, now: now)

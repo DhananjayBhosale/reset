@@ -65,3 +65,41 @@ final class AccountsTests: XCTestCase {
                        "Pro 1:00 · 70%")
     }
 }
+
+/// The dashboard's costs, windows and projects can be split by account.
+final class AccountCostsTests: XCTestCase {
+    private func call(_ id: String, org: String?, cost: Double) -> Call {
+        Call(id: id, time: Date(), model: "claude-opus-5-5", session: "s", project: "/tmp/p", sidechain: false, input: 0, cw5: 0, cw1h: 0,
+             cacheRead: 0, output: 0, advisorTokens: 0, tools: 0, mcpServers: [:], webSearches: 0, mcpAttribution: nil, cost: cost,
+             autoStart: false, org: org)
+    }
+    private let accounts: [(id: String, name: String, org: String?)] = [("claude", "Claude · Team", "team"), ("claude-pro", "Claude · Pro", "pro")]
+
+    func testEachAccountSeesOnlyItsOwnCalls() {
+        let calls = [call("a", org: "team", cost: 3), call("b", org: "pro", cost: 5), call("c", org: nil, cost: 1), call("d", org: "old-org", cost: 2)]
+        func total(_ id: String?) -> Double { UsageStore.scope(calls, accounts: accounts, account: id).reduce(0) { $0 + $1.cost } }
+        XCTAssertEqual(total(nil), 11, "All")
+        XCTAssertEqual(total("claude-pro"), 5)
+        XCTAssertEqual(total("claude"), 6, "the main account also gets untagged calls and accounts that aren't listed")
+        XCTAssertEqual(total("claude") + total("claude-pro"), total(nil), "nothing counted twice or lost")
+    }
+
+    func testOneAccountMeansNoFilter() {
+        let calls = [call("a", org: "team", cost: 3), call("b", org: "pro", cost: 5)]
+        XCTAssertEqual(UsageStore.scope(calls, accounts: [accounts[0]], account: "claude").count, 2)
+    }
+
+    func testCallsAreTaggedWithTheirTranscriptsAccount() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let u = dir.appendingPathComponent("s.jsonl")
+        let lines = [#"{"type":"attachment","attachment":{"type":"credential_org","organizationUuid":"org-pro-1234"}}"#,
+                     #"{"type":"assistant","timestamp":"2026-03-02T09:14:05.120Z","sessionId":"s","message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":1,"output_tokens":5}}}"#]
+        try (lines.joined(separator: "\n") + "\n").write(to: u, atomically: true, encoding: .utf8)
+        let size = (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        let r = ClaudeUsageScanner.parse(u, mtime: Date(), size: size, from: 0)
+        XCTAssertEqual(r.org, "org-pro-1234")
+        XCTAssertEqual(ClaudeUsageScanner.combine([r], since: .distantPast).calls.first?.org, "org-pro-1234")
+    }
+}

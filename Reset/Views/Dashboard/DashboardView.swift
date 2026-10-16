@@ -69,11 +69,34 @@ struct DashboardView: View {
         return ""
     }
 
+    private func pickerChip(_ title: String, selected: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 12))
+                .foregroundStyle(selected ? .white : Dash.dim)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Capsule().fill(selected ? Color.white.opacity(0.1) : .clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
     private var topBar: some View {
         HStack(spacing: 18) {
             (Text(greeting + " ").foregroundColor(Dash.dim) + Text(nextWindowLine).foregroundColor(.white))
                 .font(.system(size: 15))
             Spacer()
+            // With more than one Claude account, choose whose costs, windows and projects the dashboard shows.
+            if usage.accounts.count > 1 {
+                HStack(spacing: 2) {
+                    pickerChip("All", selected: usage.account == nil) { usage.account = nil }
+                    ForEach(usage.accounts, id: \.id) { a in
+                        pickerChip(a.name.components(separatedBy: " · ").last ?? a.name, selected: usage.account == a.id) { usage.account = a.id }
+                    }
+                }
+                .padding(3)
+                .background(Capsule().fill(Color.white.opacity(0.04)))
+            }
             HStack(spacing: 2) {
                 ForEach(UsageRange.allCases) { r in
                     Button { usage.range = r } label: {
@@ -206,84 +229,9 @@ struct DashboardView: View {
     // MARK: Hero
 
     private var heroCard: some View {
-        GlowCard(glow: Color(hex: 0xFF8A2A), glowAt: UnitPoint(x: 0.5, y: 0.55), glowSize: 300, glowOpacity: 0.6) {
-            let c = claude
-            let end = c?.resetsAt
-            let remaining = end.map { max(0, $0.timeIntervalSince(store.now)) } ?? 0
-            let elapsed = end != nil ? 1 - remaining / (5 * 3600) : 0
-            ZStack(alignment: .topLeading) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top) {
-                        CardHeader(title: "Claude session window", subtitle: heroSubtitle(c))
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(end.map { Fmt.clock.string(from: $0) } ?? "--").font(Dash.num(15)).foregroundStyle(.white)
-                            Text(end == nil ? "no window running" : "resets").font(Dash.label).foregroundStyle(Dash.dim)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    // The arc shares a row with the countdown, so the layout keeps them apart at any window width;
-                    // drawn behind the whole card it ran through the digits when the window was narrow.
-                    HStack(alignment: .bottom, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        if c?.state == .ready {
-                            Text("Ready").font(Dash.hero(84)).foregroundStyle(.white)
-                        } else {
-                            let h = Int(remaining) / 3600, m = (Int(remaining) % 3600) / 60
-                            Text(h > 0 ? "\(h)h \(m)" : "\(m)").font(Dash.hero(92)).foregroundStyle(.white)
-                            Text("m").font(Dash.hero(28)).foregroundStyle(Dash.dim)
-                        }
-                    }
-                    Group {
-                        if store.liveNeedsSignIn {
-                            HStack(spacing: 6) {
-                                Text("Live usage paused: Claude Code is signed out.").foregroundStyle(Color(hex: 0xFFB13D))
-                                Button(store.signingIn ? "Waiting for browser…" : "Sign in") { store.fixClaudeSignIn() }
-                                    .buttonStyle(.plain).foregroundStyle(.white).underline()
-                            }
-                        } else if let out = store.forecast.runsOutAt, c?.state != .ready {
-                            Text("at this pace you run out around \(Fmt.clock.string(from: out))").foregroundStyle(Color(hex: 0xFF8A5C))
-                        } else {
-                            Text(c?.state == .ready ? "send a message to start the clock" : "until a fresh window").foregroundStyle(Dash.dim)
-                        }
-                    }
-                    .font(Dash.label)
-                    }
-                    .layoutPriority(1)
-                    // Decorative: the countdown beside it says the same in words.
-                    WindowArc(progress: elapsed, color: Dash.claude)
-                        .accessibilityHidden(true)
-                        .frame(minWidth: 110, maxWidth: 280)
-                        .frame(height: 140)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                    .padding(.bottom, 18)
-                    HStack {
-                        Text("Limit used").font(Dash.label).foregroundStyle(Dash.dim)
-                        Spacer()
-                        Text(c?.usedPercent.map { "\(Int($0.rounded()))%" } ?? "unknown").font(Dash.num(14)).foregroundStyle(Dash.claude)
-                    }
-                    .padding(.bottom, 8)
-                    BurnBar(fraction: (c?.usedPercent ?? 0) / 100)
-                        .accessibilityElement()
-                        .accessibilityLabel("Limit used")
-                        .accessibilityValue(c?.usedPercent.map { "\(Int($0.rounded())) percent" } ?? "unknown")
-                        .overlay(alignment: .leading) {
-                            // Where the budget's cap sits on the bar, so the line below has a place to point at.
-                            if let b = store.budget {
-                                GeometryReader { g in
-                                    Capsule().fill(.white.opacity(0.85))
-                                        .frame(width: 2, height: 18)
-                                        .offset(x: g.size.width * CGFloat(b.maxPercent) / 100 - 1, y: -3)
-                                }
-                            }
-                        }
-                    if let b = store.budget { budgetLine(b, used: store.budgetUsed) }
-                }
-            }
-            .frame(height: 312)
-        }
+        HeroCard(status: claude, now: store.now, subtitle: heroSubtitle(claude), signedOut: store.liveNeedsSignIn,
+                 signingIn: store.signingIn, runsOutAt: store.forecast.runsOutAt, budget: store.budget, budgetUsed: store.budgetUsed,
+                 onSignIn: { store.fixClaudeSignIn() }, onClearBudget: { store.clearBudget() })
     }
 
     /// Where the numbers come from, and why they're a guess when they are, e.g. "Estimated from your activity ·
@@ -297,34 +245,6 @@ struct DashboardView: View {
         return c.isEstimate ? "\(base) · \(why)" : "\(base) · usage unknown, \(why)"
     }
 
-    /// The pacing budget an agent set through reset-mcp: task, cap, where it stands, and a way to clear it,
-    /// because a budget nobody clears would otherwise steer every later session.
-    private func budgetLine(_ b: Budget, used: Double?) -> some View {
-        let status = b.status(used: used)
-        let (word, color): (String, Color) = {
-            switch status {
-            case .normal: return ("on pace", Dash.dim)
-            case .wrapUp: return ("wrap up", Color(hex: 0xFFB13D))
-            case .over: return (b.downshiftModel.map { "over, switch to \($0)" } ?? "over, stop", Color(hex: 0xFF5C3A))
-            case .unknown: return ("usage unknown", Dash.dim)
-            }
-        }()
-        return HStack(spacing: 6) {
-            Text("BUDGET").foregroundStyle(Dash.dim)
-            Text(b.task).foregroundStyle(.white).lineLimit(1).truncationMode(.tail)
-            Text("cap \(b.maxPercent)%").foregroundStyle(Dash.dim)
-            Text(word).foregroundStyle(color)
-            Spacer(minLength: 8)
-            Button { store.clearBudget() } label: {
-                HStack(spacing: 3) { Image(systemName: "xmark"); Text("Clear") }
-            }
-            .buttonStyle(.plain).foregroundStyle(.white.opacity(0.8))
-            .help("Remove this budget. Agents stop getting wrap-up and downshift advice for it.")
-        }
-        .font(Dash.label)
-        .padding(.top, 8)
-        .help(b.advice(used: used))
-    }
 
     // MARK: Value
 
@@ -411,7 +331,7 @@ struct DashboardView: View {
                         LegendDot(color: Color(hex: 0xFF5C3A), text: "hit the limit")
                     }
                 }
-                WindowBarcode(windows: usage.windows(days: 7)).frame(height: 230)
+                WindowBarcode(windows: usage.windows(days: 7, scoped: true)).frame(height: 230)
             }
         }
     }
@@ -466,7 +386,7 @@ struct DashboardView: View {
                         Text("busiest hour").font(Dash.label).foregroundStyle(Dash.dim)
                     }
                 }
-                Heatmap(grid: usage.heatmap).frame(height: 104)
+                Heatmap(grid: usage.scopedHeatmap).frame(height: 104)
             }
         }
     }

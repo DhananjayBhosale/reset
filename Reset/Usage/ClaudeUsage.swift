@@ -20,6 +20,8 @@ struct Call: Codable {
     var mcpAttribution: String?
     var cost: Double
     var autoStart: Bool
+    /// The Claude organization (account) the session ran under, when its transcript says. Optional for old caches.
+    var org: String? = nil
 
     var totalTokens: Int { input + cw5 + cw1h + cacheRead + output + advisorTokens }
     var mcpCalls: Int { mcpServers.values.reduce(0, +) }
@@ -40,6 +42,8 @@ final class ClaudeUsageScanner {
         var offset: Int = 0
         /// What couldn't be read. Optional so caches written before it existed still decode.
         var health: FormatHealth?
+        /// The account the transcript's session ran under (its credential rows), for per-account costs.
+        var org: String?
     }
 
     /// Rows in one transcript that looked like usage but couldn't be read. Claude Code changing how it writes
@@ -130,7 +134,13 @@ final class ClaudeUsageScanner {
                 // so exact Date equality could miss on an unchanged file and force a needless re-parse.
                 // A recent file cached before format checks existed is read once more, so the check covers it.
                 let needsHealth = cache[url.path]?.health == nil && mod > Date().addingTimeInterval(-Self.recentWindow)
-                if let c = cache[url.path], abs(c.mtime.timeIntervalSince(mod)) < 2, c.size == size, !needsHealth { results.append(c); continue }
+                if var c = cache[url.path], abs(c.mtime.timeIntervalSince(mod)) < 2, c.size == size, !needsHealth {
+                    // Cached before accounts were tracked: a quick text search finds the org, no re-parse needed.
+                    if c.org == nil, let o = TranscriptScanner.lastOrg(url, from: 0, size: size) {
+                        c.org = o; cache[url.path] = c; changed = true
+                    }
+                    results.append(c); continue
+                }
                 var r: FileResult
                 // Appending to a result without health would leave the check counting only the new rows.
                 if let c = cache[url.path], size > c.offset, c.offset > 0, c.health != nil {
@@ -223,7 +233,8 @@ final class ClaudeUsageScanner {
         var hits: [Date] = []
         var api: [String: Int] = [:]
         for r in results {
-            for c in r.calls {
+            for var c in r.calls {
+                c.org = r.org
                 if let b = best[c.id] {
                     if c.output > b.output { var n = c; n.time = min(c.time, b.time); best[c.id] = n }
                     else if c.time < b.time { var n = b; n.time = c.time; best[c.id] = n }
@@ -262,6 +273,7 @@ final class ClaudeUsageScanner {
         }
         var out = new
         if var h = old.health, let n = new.health { h.add(n); out.health = h }
+        out.org = new.org ?? old.org
         out.calls = Array(byId.values)
         out.titles = old.titles.merging(new.titles) { _, b in b }
         out.limitHits = old.limitHits + new.limitHits
@@ -385,6 +397,7 @@ final class ClaudeUsageScanner {
         }
         out.calls = Array(bestById.values)
         out.health = health
+        out.org = TranscriptScanner.lastOrg(url, from: start, size: size)
         return out
     }
 }

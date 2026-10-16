@@ -2,6 +2,11 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.12 — costs per account
+
+- With more than one Claude account, the dashboard has an All / Team / Pro switch: costs, sessions, projects, this week's windows, the heatmap and the share card for just that account.
+- Snapshot tests draw the dashboard, the menu bar pill and every widget look and compare them with reference images, so layout slips like the arc running through the countdown fail the tests.
+
 ## 0.3.11 — two accounts, and VoiceOver
 
 - Separate Claude accounts get separate entries: for example "Claude · Team" (the account the Claude Code CLI is signed in to, with live usage, the forecast and auto-start) and "Claude · Pro", each with its own window from its own sessions, plus the Claude desktop app's readings for the second one, including a weekly limit.

@@ -258,6 +258,7 @@ final class Store {
                     }
                 }
                 self.statuses = list
+                self.usage.accounts = list.filter { $0.id == "claude" || $0.id.hasPrefix("claude-") }.map { ($0.id, $0.name, $0.account) }
                 self.lastRefresh = t
                 self.reloadBudget()
                 self.checkCLISignInIfNeeded()
@@ -440,6 +441,10 @@ final class Store {
         out["activity"] = Array(log.prefix(10))
         let lastUse = statuses.first { $0.id == "claude" }?.lastActivity
         out["network"] = ["online": network.isOnline]
+        let month = Date().addingTimeInterval(-30 * 86400)
+        out["usageByAccount"] = Dictionary(uniqueKeysWithValues: usage.accounts.map { a in
+            (a.name, (UsageStore.scope(usage.calls, accounts: usage.accounts, account: a.id).filter { $0.time >= month }.reduce(0) { $0 + $1.cost } * 100).rounded() / 100)
+        })
         let hits = liveClaude.limitHits
         let dayAgo = Date().addingTimeInterval(-86400)
         out["livePolling"] = ["lastClaudeActivity": d(lastUse), "intervalSeconds": LiveClaude.interval(lastActivity: lastUse),

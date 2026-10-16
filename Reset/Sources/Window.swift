@@ -34,6 +34,8 @@ struct WindowStatus: Identifiable, Equatable {
     var usageAsOf: Date? = nil
     /// The most recent real API response seen in this tool's logs, for pacing how often live usage is fetched.
     var lastActivity: Date? = nil
+    /// For Claude entries, the organization (account) they're for.
+    var account: String? = nil
 
     var resetsAt: Date? {
         if case .active(let d) = state { return d }

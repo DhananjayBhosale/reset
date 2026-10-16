@@ -96,11 +96,11 @@ struct ShareSheet: View {
         for c in usage.inRange { byModel[c.model, default: 0] += c.cost }
         let top = byModel.max { $0.value < $1.value }?.key ?? ""
         let topName = top.contains("opus") ? "Opus" : top.contains("sonnet") ? "Sonnet" : top.contains("haiku") ? "Haiku" : top.contains("fable") ? "Fable" : "--"
-        let windows = usage.windows(days: max(1, Int(usage.range.days(now: Date()).rounded(.up)))).count
+        let windows = usage.windows(days: max(1, Int(usage.range.days(now: Date()).rounded(.up))), scoped: true).count
         return .init(title: title, hero: hero, heroUnit: unit, line: line,
                      stats: [("tokens", Dash.tokens(mix.total)), ("windows", "\(windows)"),
                              ("cache hit", String(format: "%.0f%%", hit * 100)), ("top model", topName)],
-                     heatmap: usage.heatmap,
+                     heatmap: usage.scopedHeatmap,
                      mascot: showMascot ? MascotArt.image("claude", .fresh) : nil)
     }
 

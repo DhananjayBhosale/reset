@@ -158,9 +158,31 @@ final class UsageStore {
 
     // MARK: Aggregates for the selected range
 
+    // MARK: Account filter (dashboard and share card only; widgets and the menu always see every account)
+
+    /// Claude accounts to choose from: the status id ("claude", "claude-<org>"), its name, and its org.
+    /// Set by the store after each scan; one entry means there's nothing to choose.
+    var accounts: [(id: String, name: String, org: String?)] = []
+
+    /// The chosen account's status id, or nil for all of them.
+    var account: String? = UserDefaults.standard.string(forKey: "usageAccount") {
+        didSet { UserDefaults.standard.set(account, forKey: "usageAccount") }
+    }
+
+    /// Calls for the chosen account. The main account ("claude") also gets calls with no org or an org that
+    /// isn't one of the others (older transcripts), so nothing goes missing from "All" minus the others.
+    var scoped: [Call] { Self.scope(calls, accounts: accounts, account: account) }
+
+    static func scope(_ calls: [Call], accounts: [(id: String, name: String, org: String?)], account: String?) -> [Call] {
+        guard let id = account, accounts.count > 1, let entry = accounts.first(where: { $0.id == id }) else { return calls }
+        let others = Set(accounts.filter { $0.id != "claude" }.compactMap(\.org))
+        if id == "claude" { return calls.filter { $0.org.map { !others.contains($0) } ?? true } }
+        return calls.filter { $0.org == entry.org }
+    }
+
     var inRange: [Call] {
         let s = range.start(now: Date())
-        return calls.filter { $0.time >= s }
+        return scoped.filter { $0.time >= s }
     }
 
     var totalCost: Double { inRange.reduce(0) { $0 + $1.cost } }
@@ -191,8 +213,12 @@ final class UsageStore {
         }
     }
 
-    /// Output tokens by weekday (Mon = 0) and hour, over the full history.
-    var heatmap: [[Double]] {
+    /// Output tokens by weekday (Mon = 0) and hour, over the full history, every account.
+    var heatmap: [[Double]] { Self.heatmap(calls) }
+    /// The same for the dashboard's chosen account.
+    var scopedHeatmap: [[Double]] { Self.heatmap(scoped) }
+
+    static func heatmap(_ calls: [Call]) -> [[Double]] {
         var g = Array(repeating: Array(repeating: 0.0, count: 24), count: 7)
         let cal = Calendar.current
         for c in calls {
@@ -204,7 +230,7 @@ final class UsageStore {
 
     var busiestHour: Int? {
         var byHour = Array(repeating: 0.0, count: 24)
-        for row in heatmap { for h in 0..<24 { byHour[h] += row[h] } }
+        for row in scopedHeatmap { for h in 0..<24 { byHour[h] += row[h] } }
         guard let m = byHour.max(), m > 0 else { return nil }
         return byHour.firstIndex(of: m)
     }
@@ -252,10 +278,11 @@ final class UsageStore {
     }
 
     /// 5-hour windows over the last `days`, rebuilt from activity the same way the reset estimate is.
-    func windows(days: Int = 7) -> [UsageWindow] {
+    /// `scoped` uses the dashboard's chosen account; each account's windows are its own.
+    func windows(days: Int = 7, scoped: Bool = false) -> [UsageWindow] {
         let since = Calendar.current.startOfDay(for: Date().addingTimeInterval(-Double(days - 1) * 86400))
         var out: [UsageWindow] = []
-        for c in calls where c.time >= since.addingTimeInterval(-5 * 3600) {
+        for c in (scoped ? self.scoped : calls) where c.time >= since.addingTimeInterval(-5 * 3600) {
             if let last = out.last, c.time < last.end { continue }
             let start = ClaudeSource.floorTo10(c.time)
             out.append(UsageWindow(start: start, end: start.addingTimeInterval(5 * 3600), autoStart: c.autoStart, hitLimit: false))
