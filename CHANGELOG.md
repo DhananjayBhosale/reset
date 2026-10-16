@@ -2,6 +2,13 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.9 — fresher, steadier
+
+- Live usage updates about every minute while you're using Claude Code, and every 5 minutes when idle: fresher numbers when they move, fewer requests overall.
+- When you're running out, the red pill shows what's left and when it runs out ("86% · out 9:29") instead of a countdown that read like a second clock time.
+- Auto-start and Start now wait for a working network instead of timing out offline and using up their tries.
+- Antigravity's last reading stays visible while the app is closed, labelled with when it was seen.
+
 ## 0.3.8 — your window at a glance
 
 - A colored pill in the menu bar: orange "2:46 · 42%" as usual, red when the window is nearly empty or your pace runs out before the reset ("38% · out 10:07"), green "ready" when a fresh window is waiting, a warning sign while Claude Code is signed out, and a moon with the time a weekly limit lifts. Settings → Appearance switches back to plain text.

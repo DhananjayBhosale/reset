@@ -38,6 +38,18 @@ final class AutoStartStateTests: XCTestCase {
         XCTAssertNil(a.kickDue["claude"], "auto-start is off")
     }
 
+    func testToolsWithoutAutoStartAreNotTracked() {
+        // A closed Antigravity once left a reset from two days earlier in the saved state.
+        var a = AutoStartState(lastSeenReset: ["antigravity": reset.addingTimeInterval(-2 * 86400)],
+                               kickDue: ["antigravity": .init(reset: reset, attempts: 1)])
+        let ag = WindowStatus(id: "antigravity", name: "Antigravity", state: .unavailable("closed"), usedPercent: nil,
+                              isEstimate: false, source: "", secondary: nil, canAutoStart: false)
+        a.track([ag, claude(.active(resetsAt: reset))], now: reset.addingTimeInterval(-60)) { $0.canAutoStart && $0.id == "claude" }
+        XCTAssertNil(a.lastSeenReset["antigravity"])
+        XCTAssertNil(a.kickDue["antigravity"])
+        XCTAssertEqual(a.lastSeenReset["claude"], reset, "tools that do auto-start are still tracked")
+    }
+
     func testTurningAutoStartOnAfterTheResetDoesNotFireIt() {
         var a = AutoStartState(lastSeenReset: ["claude": reset], armedAt: ["claude": reset.addingTimeInterval(10)])
         a.track([claude(.ready)], now: reset.addingTimeInterval(60), wantsAutoStart: on)

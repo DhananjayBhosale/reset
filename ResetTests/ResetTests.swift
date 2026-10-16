@@ -322,3 +322,33 @@ final class LivePollTests: XCTestCase {
         XCTAssertEqual(LiveClaude.interval(lastActivity: nil, now: now), 300, "no activity seen at all")
     }
 }
+
+/// Antigravity's last reading keeps a running window visible after the app is closed.
+final class AntigravityLastSeenTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_772_442_000)
+
+    func testRunningWindowShowsWithWhenItWasSeen() throws {
+        let c = AntigravitySource.Cached(seenAt: now.addingTimeInterval(-1800), resetsAt: now.addingTimeInterval(3600), usedPercent: 40,
+                                         group: "Gemini", weeklyResetsAt: now.addingTimeInterval(86400), weeklyUsed: 20, blockedUntil: nil)
+        let s = try XCTUnwrap(AntigravitySource.lastSeen(c, now: now))
+        XCTAssertEqual(s.resetsAt, now.addingTimeInterval(3600), "the reset time the app reported stays exact")
+        XCTAssertEqual(s.usedPercent, 40)
+        XCTAssertEqual(s.usageAsOf, now.addingTimeInterval(-1800), "the percentage is labelled with when it was seen")
+        XCTAssertTrue(s.source.hasPrefix("Last seen"))
+        XCTAssertEqual(s.secondary?.label, "Weekly")
+    }
+
+    func testEndedWindowShowsNothing() {
+        let c = AntigravitySource.Cached(seenAt: now.addingTimeInterval(-7200), resetsAt: now.addingTimeInterval(-60), usedPercent: 90,
+                                         group: nil, weeklyResetsAt: nil, weeklyUsed: nil, blockedUntil: nil)
+        XCTAssertNil(AntigravitySource.lastSeen(c, now: now), "an old reading can't say anything about a new window")
+        XCTAssertNil(AntigravitySource.lastSeen(nil, now: now))
+    }
+
+    func testWeeklyLimitStillShowsUntilItLifts() throws {
+        let c = AntigravitySource.Cached(seenAt: now.addingTimeInterval(-3600), resetsAt: nil, usedPercent: 100, group: nil,
+                                         weeklyResetsAt: now.addingTimeInterval(86400), weeklyUsed: 100, blockedUntil: now.addingTimeInterval(86400))
+        let s = try XCTUnwrap(AntigravitySource.lastSeen(c, now: now))
+        XCTAssertEqual(s.blockedUntil, now.addingTimeInterval(86400))
+    }
+}

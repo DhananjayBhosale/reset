@@ -70,6 +70,9 @@ final class Store {
     let usage = UsageStore()
     let keepAwake = KeepAwake()
     let updater = Updater()
+    let network = NetworkWatch()
+    /// So "waiting for the network" is noted once per wait, not every second.
+    private var notedOffline = false
     private var tick: Timer?
     private var lastScan = Date.distantPast
     private var scanning = false
@@ -331,6 +334,12 @@ final class Store {
             }
             // Two minutes of slack past the reset, so a slightly early estimate does not burn a kick.
             guard s.state == .ready, t >= due.reset.addingTimeInterval(120) else { continue }
+            // Offline, a run can only time out; wait for the network without spending one of the 4 tries.
+            guard network.isOnline else {
+                if !notedOffline { notedOffline = true; note("\(s.name): auto-start waiting for the network") }
+                continue
+            }
+            notedOffline = false
             guard due.attempts < 4 else {
                 auto.kickDue[id] = nil
                 note("\(s.name): auto-start gave up after 4 tries")
@@ -428,6 +437,7 @@ final class Store {
         out["autoStartNeedsSignIn"] = autoStartNeedsSignIn
         out["activity"] = Array(log.prefix(10))
         let lastUse = statuses.first { $0.id == "claude" }?.lastActivity
+        out["network"] = ["online": network.isOnline]
         out["livePolling"] = ["lastClaudeActivity": d(lastUse), "intervalSeconds": LiveClaude.interval(lastActivity: lastUse)]
         out["problemReport"] = problemReportURL().flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "body" }?.value } ?? NSNull()
         out["logFormat"] = ["verdict": usage.format.verdict.rawValue, "summary": usage.format.summary,
@@ -731,6 +741,10 @@ final class Store {
 
     func startFromWidget(_ id: String) {
         let s = statuses.first { $0.id == id }
+        guard network.isOnline else {
+            note("Start now from a widget: no network, try again once you're online")
+            return
+        }
         // A marker older than a run's limit is left over from a start that never reported back; ignore it.
         let kicking = widgetStarting[id].map { Date().timeIntervalSince($0) < 240 } ?? false
         guard Self.shouldStartFromWidget(s, command: commands[id], kicking: kicking, demo: Demo.isOn) else {

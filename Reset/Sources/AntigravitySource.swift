@@ -10,7 +10,8 @@ struct AntigravitySource: WindowSource {
         var status = WindowStatus(id: id, name: "Antigravity", state: .unavailable("Open Antigravity to read its usage"),
                                   usedPercent: nil, isEstimate: false, source: "Antigravity, live while the app is open",
                                   secondary: nil, canAutoStart: false)
-        guard let server = Self.findServer() else { return status }
+        // Closed: show the last reading if its window is still running, rather than nothing until it's reopened.
+        guard let server = Self.findServer() else { return Self.lastSeen(Self.loadCache(), now: now) ?? status }
         guard let summary = Self.quotaSummary(server) else {
             status.state = .unavailable("Antigravity is open but didn't share its usage")
             return status
@@ -30,7 +31,53 @@ struct AntigravitySource: WindowSource {
             status.secondary = .init(label: "Weekly", resetsAt: r, usedPercent: (1 - w.remaining) * 100)
             if w.remaining <= 0.001 { status.blockedUntil = r }
         }
+        Self.saveCache(Cached(seenAt: now, resetsAt: status.resetsAt, usedPercent: status.usedPercent, group: session?.group,
+                              weeklyResetsAt: status.secondary?.resetsAt, weeklyUsed: status.secondary?.usedPercent,
+                              blockedUntil: status.blockedUntil))
         return status
+    }
+
+    // MARK: Last reading, for while Antigravity is closed
+
+    /// The last good reading, saved each time the app answers. Only reset times and percentages.
+    struct Cached: Codable, Equatable {
+        var seenAt: Date
+        var resetsAt: Date?
+        var usedPercent: Double?
+        var group: String?
+        var weeklyResetsAt: Date?
+        var weeklyUsed: Double?
+        var blockedUntil: Date?
+    }
+
+    static var cacheURL: URL { WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("antigravity-last.json") }
+
+    static func saveCache(_ c: Cached) {
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .secondsSince1970
+        guard let d = try? enc.encode(c) else { return }
+        try? d.write(to: cacheURL, options: .atomic)
+    }
+
+    static func loadCache() -> Cached? {
+        guard let d = try? Data(contentsOf: cacheURL) else { return nil }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .secondsSince1970
+        return try? dec.decode(Cached.self, from: d)
+    }
+
+    /// A status from the last reading, while its window (or a weekly limit) is still running. The reset time is
+    /// what the app reported, so it stays exact; the percentage is as of when it was seen, and says so.
+    static func lastSeen(_ c: Cached?, now: Date) -> WindowStatus? {
+        guard let c else { return nil }
+        let blocked = c.blockedUntil.map { $0 > now } ?? false
+        guard (c.resetsAt.map { $0 > now } ?? false) || blocked else { return nil }
+        var s = WindowStatus(id: "antigravity", name: "Antigravity", state: .ready, usedPercent: c.usedPercent, isEstimate: false,
+                             source: "Last seen \(Fmt.when(c.seenAt, now: now)) while Antigravity was open",
+                             secondary: nil, canAutoStart: false)
+        if let r = c.resetsAt, r > now { s.state = .active(resetsAt: r) }
+        s.usageAsOf = c.seenAt
+        if let w = c.weeklyResetsAt, w > now { s.secondary = .init(label: "Weekly", resetsAt: w, usedPercent: c.weeklyUsed) }
+        if blocked { s.blockedUntil = c.blockedUntil }
+        return s
     }
 
     struct Server { var pid: Int32; var csrf: String; var extensionPort: Int?; var extensionCsrf: String? }

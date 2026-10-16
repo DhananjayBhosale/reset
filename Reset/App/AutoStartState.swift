@@ -26,6 +26,13 @@ struct AutoStartState: Codable, Equatable {
     /// while Reset wasn't running gets caught up. A new window (yours or a kick's) clears anything pending.
     mutating func track(_ statuses: [WindowStatus], now: Date, wantsAutoStart: (WindowStatus) -> Bool) {
         for s in statuses {
+            // A reset only matters for a kick. Tools that can't or won't auto-start aren't tracked, so nothing
+            // lingers for them (a closed Antigravity once left a reset from two days earlier).
+            guard wantsAutoStart(s) else {
+                lastSeenReset[s.id] = nil
+                kickDue[s.id] = nil
+                continue
+            }
             if let r = s.resetsAt {
                 lastSeenReset[s.id] = r
                 kickDue[s.id] = nil
