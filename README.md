@@ -10,7 +10,7 @@
 
 <p align="center"><img src="docs/share-card.png" width="720" alt="Reset share card"></p>
 
-Reset is a free, open source macOS app for people who live inside Claude Code (with Codex, Gemini CLI and Antigravity support too). It sits in your menu bar, counts down to your next fresh window, and turns your local usage logs into a dashboard, desktop widgets and a card you can post.
+Reset is a free, open source macOS app for people who live inside Claude Code (with Codex, Gemini CLI, Antigravity and Cursor support too). It sits in your menu bar, counts down to your next fresh window, and turns your local usage logs into a dashboard, desktop widgets and a card you can post.
 
 Everything it reads stays on your Mac.
 
@@ -150,10 +150,12 @@ Reset reads local files only:
 - `~/Library/Application Support/Claude/plan-usage-history.json` from the Claude desktop app
 - Codex session logs in `~/.codex/sessions`
 - Antigravity's local language server, while Antigravity is open
+- If you switch Cursor on: the Cursor app's sign-in and plan name in `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`, opened read-only
 
 It only sends anything off your Mac for these features, and only to the place you'd expect:
 
 - **Live Claude usage** sends Claude Code's sign-in to `api.anthropic.com` to read your usage. Reset never stores, refreshes or rewrites that sign-in.
+- **Cursor**, off until you switch it on in Settings, sends the Cursor app's sign-in to `api2.cursor.sh` to read this month's usage. Reset never stores, refreshes or rewrites that sign-in.
 - **Phone alerts** send the alert text to the ntfy server you choose. The text is only reset and run-out times, such as "Claude has reset: fresh window ready since 7:40 PM", but anyone who knows your topic name can read it, so pick a long, random topic.
 - **Update checks** ask `api.github.com` once a day whether a newer release exists. Turn this off in Settings → General.
 
@@ -227,7 +229,7 @@ Use `no_rows` instead of `problems` for the "no usage found" variant. `-renderSe
 
 ## Trademarks
 
-Reset is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI or Google. Claude, Codex, Gemini and Antigravity are trademarks of their owners. The mascots are unofficial fan art based on those products' logos; you can turn them off in Settings → Appearance. If you represent one of these companies and want the fan art changed or removed, please open an issue.
+Reset is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI, Google or Anysphere. Claude, Codex, Gemini, Antigravity and Cursor are trademarks of their owners. The mascots are unofficial fan art based on those products' logos; you can turn them off in Settings → Appearance. If you represent one of these companies and want the fan art changed or removed, please open an issue.
 
 ## License
 

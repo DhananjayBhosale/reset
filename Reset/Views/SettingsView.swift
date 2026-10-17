@@ -215,7 +215,7 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    private let builtIns = [("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini CLI"), ("antigravity", "Antigravity")]
+    private let builtIns = [("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini CLI"), ("antigravity", "Antigravity"), ("cursor", "Cursor")]
 
     /// The built-in tools, with any other Claude account right after Claude, named as it appears elsewhere.
     private var toolList: [(String, String)] {

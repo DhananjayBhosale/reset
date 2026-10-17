@@ -46,7 +46,7 @@ final class Store {
 
     /// What a look card needs for one provider, with the mascot in its current mood.
     func cardData(for s: WindowStatus) -> CardData {
-        let window: TimeInterval = s.id == "gemini" ? 86400 : 5 * 3600
+        let window = WindowStatus.length(of: s.id)
         return CardData(id: s.id, name: s.name, color: Theme.color(for: s.id), windowStart: s.resetsAt?.addingTimeInterval(-window),
                         resetsAt: s.resetsAt, ready: s.state == .ready, blockedUntil: s.blockedUntil, used: s.usedPercent,
                         mascot: MascotArt.image(s.id, Mood.of(s, justReset: false)).map { Image(nsImage: $0) }, windowLength: window,
@@ -102,6 +102,10 @@ final class Store {
             let has = FileManager.default.fileExists(atPath: "/Applications/Antigravity.app")
             prefs["antigravity"] = ProviderPrefs(enabled: has, alert: has)
         }
+        // Off until switched on: reading Cursor sends its sign-in to Cursor's servers (see CursorSource).
+        if prefs["cursor"] == nil {
+            prefs["cursor"] = ProviderPrefs(enabled: false, alert: false)
+        }
         if prefs["gemini"] == nil {
             let hasGemini = FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.gemini")
             prefs["gemini"] = ProviderPrefs(enabled: hasGemini, alert: false)
@@ -114,6 +118,7 @@ final class Store {
         keepAwake.start()
         updater.start()
         usage.start()
+        CursorSource.onUpdate = { [weak self] in self?.cursorUpdated() }
         refresh()
         // A 1 s tick keeps the countdowns live; disk is rescanned every 60 s or on demand.
         tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.onTick() }
@@ -172,12 +177,23 @@ final class Store {
 
     func setPrefs(_ id: String, _ update: (inout ProviderPrefs) -> Void) {
         var p = prefs(for: id)
-        let wasAuto = p.autoStart
+        let wasAuto = p.autoStart, wasEnabled = p.enabled
         update(&p)
         prefs[id] = p
         mascots.sync()
         if p.autoStart && !wasAuto { auto.armedAt[id] = Date(); auto.kickDue[id] = nil }
         syncAlerts()
+        // Cursor only reads while it's on, so read it now rather than at the next scan.
+        if id == "cursor", p.enabled, !wasEnabled { refresh() }
+    }
+
+    /// A Cursor reading landed. Shown straight away, since a full scan can take a while, then rescanned so
+    /// alerts and anything else that follows the statuses catch up.
+    private func cursorUpdated() {
+        if let i = statuses.firstIndex(where: { $0.id == "cursor" }) {
+            statuses[i] = CursorSource(enabled: prefs(for: "cursor").enabled).read(now: Date())
+        }
+        refresh()
     }
 
     var visible: [WindowStatus] { statuses.filter { prefs(for: $0.id).enabled } }
@@ -240,6 +256,7 @@ final class Store {
         scanning = true
         let extras = claudeExtraStarts
         let custom = self.custom
+        let cursorOn = prefs(for: "cursor").enabled
         scanQueue.async { [weak self] in
             let t = Date()
             // One Claude entry per account (see ClaudeSource.readAll), then the other tools.
@@ -248,6 +265,7 @@ final class Store {
                 CodexSource().read(now: t),
                 GeminiSource().read(now: t),
                 AntigravitySource().read(now: t),
+                CursorSource(enabled: cursorOn).read(now: t),
             ]
             list += custom.map { $0.status(now: t) }
             DispatchQueue.main.async {
