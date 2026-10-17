@@ -16,6 +16,12 @@ struct WidgetSnapshot: Codable {
         /// The weekly limit, when known (live usage on a Pro or Max plan): % used and when it resets.
         var weeklyUsed: Double? = nil
         var weeklyResetsAt: Date? = nil
+        /// When the usage % was read (from Anthropic, or the Claude desktop app). `updated` only says when the
+        /// snapshot last changed, which can't tell an agent how old the reading behind it is.
+        var usageAsOf: Date? = nil
+        /// The live check has been failing since then, and why; the % above is the last good one.
+        var liveFailingSince: Date? = nil
+        var liveProblem: String? = nil
     }
     struct Window: Codable {
         var start: Date

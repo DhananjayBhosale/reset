@@ -2,6 +2,11 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.18 — agents know how old the numbers are
+
+- The MCP server's get_claude_usage says when usage was last read (usage_as_of, usage_age_minutes) and, if the live check is failing, since when and why (usage_may_be_stale). The advice and any budget then warn that the reading may be out of date.
+- A pace warning with plenty of window left reads "On pace to run out before the reset" instead of "Window nearly exhausted".
+
 ## 0.3.17 — name your accounts
 
 - Two Claude accounts on the same plan no longer both show as "Claude · Pro": they're numbered ("Pro", "Pro 2"), and Settings → General → Claude accounts lets you name them, say Work and Personal.

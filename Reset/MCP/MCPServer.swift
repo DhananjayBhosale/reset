@@ -36,7 +36,7 @@ enum MCPServer {
         case "initialize":
             let requested = params?["protocolVersion"] as? String ?? "2025-06-18"
             return result(["protocolVersion": requested, "capabilities": ["tools": [String: Any]()],
-                           "serverInfo": ["name": "reset", "version": "0.3.17"]])
+                           "serverInfo": ["name": "reset", "version": "0.3.18"]])
         case "tools/list":
             return result(["tools": tools])
         case "tools/call":
@@ -73,7 +73,7 @@ enum MCPServer {
     static let tools: [[String: Any]] = [
         [
             "name": "get_claude_usage",
-            "description": "How much of the Claude usage window is left, when it resets, whether it will run out first at the current pace, today's API-value spend, and the active pacing budget if one is set. Use it before starting large or parallel work, and between steps while a budget is set.",
+            "description": "How much of the Claude usage window is left, when it resets, whether it will run out first at the current pace, today's API-value spend, and the active pacing budget if one is set. usage_as_of says when the usage was last read; usage_may_be_stale is true when that's old or the live check is failing. Use it before starting large or parallel work, and between steps while a budget is set.",
             "inputSchema": ["type": "object", "properties": [String: Any](), "additionalProperties": false],
         ],
         [
@@ -132,6 +132,9 @@ enum MCPServer {
         return out
     }
 
+    /// Past this a reading counts as old: polling is every 2 minutes in use and 5 when idle, so 10 means misses.
+    static let staleReading: TimeInterval = 10 * 60
+
     static func usageReport(snapshot: WidgetSnapshot?, budget: Budget?, now: Date, running: Bool = true) -> [String: Any] {
         guard let snap = snapshot else {
             var out: [String: Any] = ["error": "Reset isn't running or hasn't written usage yet. Open Reset.app."]
@@ -160,6 +163,20 @@ enum MCPServer {
                 claude["weekly_percent_used"] = Int(w.rounded())
                 claude["weekly_resets_at_local"] = local.string(from: r)
             }
+            // How old the reading is, and whether the live check is failing: the last good % keeps being reported for
+            // up to 15 minutes, so without this an agent would pace on it as if it were current.
+            if let a = c.usageAsOf, !ready {
+                claude["usage_as_of"] = iso.string(from: a)
+                claude["usage_as_of_local"] = local.string(from: a)
+                claude["usage_age_minutes"] = max(0, Int(now.timeIntervalSince(a) / 60))
+            }
+            if let since = c.liveFailingSince {
+                claude["live_check_failing_since_local"] = local.string(from: since)
+                if let why = c.liveProblem { claude["live_check_problem"] = why }
+            }
+            let readingStale = c.used != nil && !ready
+                && (c.liveFailingSince != nil || c.usageAsOf.map { now.timeIntervalSince($0) > staleReading } == true)
+            if readingStale { claude["usage_may_be_stale"] = true }
             // An agent pacing itself should know when these numbers are a guess, and why.
             claude["estimated"] = c.estimate != nil
             if let e = c.estimate { claude["estimate_note"] = e }
@@ -181,8 +198,10 @@ enum MCPServer {
                 // Over budget is the most specific instruction there is: it names the task and the model to switch to.
                 out["advice"] = budget.advice(used: used)
             } else if runsOut != nil || (left ?? 100) < 15 {
-                let when = runsOut.map { " At this pace it runs out around \(local.string(from: $0)), before the reset." } ?? ""
-                out["advice"] = "Window nearly exhausted.\(when) Finish the current step, prefer smaller models for subagents, avoid broad fan-outs until the reset."
+                // "Nearly exhausted" with 65% left read wrong; a pace warning says what's actually true.
+                let lead = (left ?? 100) < 15 ? "Window nearly exhausted." : "On pace to run out before the reset."
+                let when = runsOut.map { " At this pace it runs out around \(local.string(from: $0))." } ?? ""
+                out["advice"] = "\(lead)\(when) Finish the current step, prefer smaller models for subagents, avoid broad fan-outs until the reset."
             } else if let w = weekly, w >= 90, let r = c.weeklyResetsAt {
                 // Close to the weekly limit, new 5-hour windows stop helping; that matters more than a budget nudge.
                 out["advice"] = "The weekly limit is \(Int(w.rounded()))% used until \(local.string(from: r)). Save heavy work for after that; prefer smaller models and lean subagents."
@@ -195,6 +214,11 @@ enum MCPServer {
             } else {
                 out["advice"] = "Plenty of window left."
             }
+            if readingStale, let a = out["advice"] as? String {
+                let when = c.usageAsOf.map { local.string(from: $0) } ?? "a while ago"
+                let why = c.liveFailingSince.map { " because the live usage check has been failing since \(local.string(from: $0))" } ?? ""
+                out["advice"] = "Usage was last read at \(when)\(why), so it may be out of date. \(a)"
+            }
         }
         // The snapshot outlives the app; numbers from a Reset that has quit are history, not a reading.
         if !running {
@@ -202,7 +226,14 @@ enum MCPServer {
             out["note"] = "Reset isn't running, so these numbers are from \(local.string(from: snap.updated)) and may be out of date. Open Reset.app for current ones."
             out["advice"] = "Reset isn't running, so how much window is left is unknown. Pace conservatively until it's open again."
         }
-        if let budget { out["budget"] = budgetReport(budget, used: used) }
+        if let budget {
+            var b = budgetReport(budget, used: used)
+            // The budget is judged on the same reading, so it carries the same warning.
+            if let c = snap.claude, c.used != nil, c.liveFailingSince != nil || c.usageAsOf.map({ now.timeIntervalSince($0) > staleReading }) == true {
+                b["warning"] = "Judged on usage read \(c.usageAsOf.map { local.string(from: $0) } ?? "a while ago"); it may be out of date."
+            }
+            out["budget"] = b
+        }
         var cost: [String: Any] = ["last_7_days_usd": usd(snap.weekCost)]
         if let t = snap.todayCumulative?.last { cost["today_usd"] = usd(t) }
         if let m = snap.monthCost { cost["last_30_days_usd"] = usd(m) }

@@ -86,6 +86,8 @@ The first launch opens a short setup guide that covers all of this. You can run 
 
 **Does Claude checking its own window over MCP use up that window?** Barely. Reset's MCP server makes no API call; it reads a file Reset already keeps on your Mac. The only cost is the answer landing in the conversation, about 150 to 250 tokens a check, plus about 350 tokens for the three tools' descriptions in context. That's less than Claude reading one small file.
 
+**Can an agent tell when the numbers are old?** Yes. `get_claude_usage` includes `usage_as_of` and `usage_age_minutes` (when the usage was last read from Anthropic), and if the live check starts failing, `live_check_failing_since_local`, the reason, and `usage_may_be_stale: true`. The advice and any budget then say the reading may be out of date. If Reset itself quits, everything is marked `stale`.
+
 **How exact is the countdown?** With live usage on, the reset time and % come straight from your Claude account, refreshed every 2 minutes while you work and every 5 when idle. Without it, Reset estimates from your Claude Code activity and labels the numbers "estimated", so you always know which you're looking at.
 
 **Does it track the weekly limit?** Yes, on Pro and Max plans with live usage on. The menu shows the weekly %, it warns you from 80% (in the menu, the status line and one notification a week), and once it's used up it shows when it lifts. Claude sees it through the MCP server too.

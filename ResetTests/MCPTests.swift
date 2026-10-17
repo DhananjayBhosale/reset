@@ -240,7 +240,8 @@ final class MCPServerTests: XCTestCase {
         s.claudeRunsOutAt = now.addingTimeInterval(3600)
         snapshot = s
         let (report, _) = call("get_claude_usage")
-        XCTAssertTrue((report["advice"] as? String)?.hasPrefix("Window nearly exhausted. At this pace") == true)
+        XCTAssertTrue((report["advice"] as? String)?.hasPrefix("On pace to run out before the reset. At this pace") == true,
+                      "70% left isn't \"nearly exhausted\"")
         XCTAssertEqual((report["claude"] as? [String: Any])?["minutes_until_run_out"] as? Int, 60)
     }
 
@@ -254,6 +255,29 @@ final class MCPServerTests: XCTestCase {
         s.providers[0].weeklyUsed = 50
         snapshot = s
         XCTAssertEqual(call("get_claude_usage").0["advice"] as? String, "Plenty of window left.", "half a week used is normal")
+    }
+
+    func testTheReadingsAgeAndALiveCheckFailureReachTheAgent() {
+        var s = snap(used: 30)
+        s.providers[0].usageAsOf = now.addingTimeInterval(-90)
+        snapshot = s
+        var (report, _) = call("get_claude_usage")
+        var claude = report["claude"] as? [String: Any]
+        XCTAssertEqual(claude?["usage_age_minutes"] as? Int, 1)
+        XCTAssertNil(claude?["usage_may_be_stale"], "a fresh reading is just a reading")
+        XCTAssertEqual(report["advice"] as? String, "Plenty of window left.")
+
+        _ = call("set_budget", ["task": "t", "max_window_percent": 50])
+        s.providers[0].usageAsOf = now.addingTimeInterval(-12 * 60)
+        s.providers[0].liveFailingSince = now.addingTimeInterval(-11 * 60)
+        s.providers[0].liveProblem = "Couldn't reach Anthropic"
+        snapshot = s
+        (report, _) = call("get_claude_usage")
+        claude = report["claude"] as? [String: Any]
+        XCTAssertEqual(claude?["usage_may_be_stale"] as? Bool, true)
+        XCTAssertEqual(claude?["live_check_problem"] as? String, "Couldn't reach Anthropic")
+        XCTAssertTrue((report["advice"] as? String)?.hasPrefix("Usage was last read at") == true)
+        XCTAssertNotNil((report["budget"] as? [String: Any])?["warning"], "the budget is judged on the same old reading")
     }
 
     func testNumbersFromAResetThatQuitAreMarkedStale() {

@@ -627,6 +627,18 @@ final class Store {
         note("Forecast: limit around \(Fmt.clock.string(from: out))")
     }
 
+    /// When an entry's usage % was read: the live check's last good answer for Claude, else the source's own time.
+    private func usageReadAt(_ s: WindowStatus) -> Date? {
+        guard s.usedPercent != nil else { return nil }
+        if s.id == "claude", liveClaudeEnabled, !s.isEstimate, let f = liveClaude.snapshot?.fetchedAt { return f }
+        return s.usageAsOf
+    }
+
+    private var liveProblemText: String? {
+        if case .problem(let why) = liveClaude.state { return why }
+        return nil
+    }
+
     /// Once per weekly cycle, when the weekly limit passes 80%: by the time it's used up, a fresh 5-hour window
     /// no longer helps, and that was the first anyone heard of it.
     private func warnIfWeeklyHigh(_ name: String, _ sec: WindowStatus.Secondary) {
@@ -662,7 +674,9 @@ final class Store {
             if case .unavailable = s.state { available = false }
             return .init(id: s.id, name: s.name, resetsAt: s.resetsAt, ready: s.state == .ready, available: available,
                          used: s.usedPercent, blockedUntil: s.blockedUntil, estimate: estimateNote(for: s),
-                         weeklyUsed: s.secondary?.usedPercent, weeklyResetsAt: s.secondary?.resetsAt)
+                         weeklyUsed: s.secondary?.usedPercent, weeklyResetsAt: s.secondary?.resetsAt,
+                         usageAsOf: usageReadAt(s), liveFailingSince: s.id == "claude" && liveClaudeEnabled ? liveClaude.failingSince : nil,
+                         liveProblem: s.id == "claude" && liveClaudeEnabled ? liveProblemText : nil)
         }
         // 7 days: the week widget counts this week's windows from these (5 undercounted it); the barcode draws its own 5 rows.
         let windows = usage.windows(days: 7).map { WidgetSnapshot.Window(start: $0.start, end: $0.end, autoStart: $0.autoStart, hitLimit: $0.hitLimit) }

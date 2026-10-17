@@ -65,6 +65,9 @@ final class LiveClaude {
     private(set) var state: State = .off
     /// True when the failure is about Claude Code's sign-in, which the user has to fix (not a network blip).
     private(set) var needsSignIn = false
+    /// When the live check started failing, cleared by the next good answer. Agents pacing on the last reading
+    /// need to know it's getting old (see the MCP server's usage_as_of).
+    private(set) var failingSince: Date?
     private var lastAttempt = Date.distantPast
     private var backoffUntil = Date.distantPast
     private let lock = NSLock()
@@ -171,6 +174,7 @@ final class LiveClaude {
                 }
                 DispatchQueue.main.async {
                     self.needsSignIn = false
+                    self.failingSince = nil
                     self.snapshot = snap
                     self.state = snap.fiveHour == nil && snap.sevenDay == nil
                         ? .problem("Signed in, but Anthropic reports no usage windows for this account")
@@ -209,7 +213,11 @@ final class LiveClaude {
                 try? d.write(to: WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("live-usage.json"))
             }
         }
-        DispatchQueue.main.async { self.state = s; done() }
+        DispatchQueue.main.async {
+            self.state = s
+            if case .problem = s { self.failingSince = self.failingSince ?? Date() }
+            done()
+        }
     }
 
     private static let isoFrac: ISO8601DateFormatter = {
