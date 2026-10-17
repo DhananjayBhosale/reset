@@ -83,6 +83,16 @@ final class AccountsTests: XCTestCase {
                        "one account: the one price, as before")
     }
 
+    func testTwoAccountsOnTheSamePlanCanBeToldApart() {
+        let ids = ["claude", "claude-aaaa1111", "claude-bbbb2222"]
+        XCTAssertEqual(ClaudeSource.accountLabels(ids: ids, defaults: ["Pro", "Pro", "Pro"], custom: [:]), ["Pro", "Pro 2", "Pro 3"])
+        XCTAssertEqual(ClaudeSource.accountLabels(ids: ids, defaults: ["Team", "Pro", "other account"], custom: [:]),
+                       ["Team", "Pro", "other account"], "different plans keep their names")
+        XCTAssertEqual(ClaudeSource.accountLabels(ids: ids, defaults: ["Pro", "Pro", "Pro"],
+                                                  custom: ["claude": "Work", "claude-aaaa1111": "Personal", "claude-bbbb2222": " "]),
+                       ["Work", "Personal", "Pro"], "names given in Settings win; a blank one falls back to the plan")
+    }
+
     func testNames() {
         XCTAssertEqual(ClaudeSource.planLabel("team"), "Team")
         XCTAssertEqual(ClaudeSource.planLabel("max"), "Max")

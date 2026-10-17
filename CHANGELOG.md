@@ -2,6 +2,10 @@
 
 The latest release is on the [Releases page](https://github.com/msfbeast/reset/releases/latest). Older builds are kept but not listed; this file is the history.
 
+## 0.3.17 — name your accounts
+
+- Two Claude accounts on the same plan no longer both show as "Claude · Pro": they're numbered ("Pro", "Pro 2"), and Settings → General → Claude accounts lets you name them, say Work and Personal.
+
 ## 0.3.16 — easier setup, earlier warnings
 
 - One-click Claude Code setup: Settings → Advanced shows whether the status line and MCP server are set up and adds them for you (backing up settings.json first), using Reset's real location.

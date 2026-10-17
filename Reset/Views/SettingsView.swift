@@ -155,6 +155,25 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if store.usage.accounts.count > 1 {
+                Section {
+                    ForEach(store.usage.accounts, id: \.id) { a in
+                        HStack {
+                            Text(a.id == "claude" ? "Signed in to Claude Code" : "Other account").foregroundStyle(.secondary)
+                            Spacer()
+                            TextField("", text: accountName(a.id), prompt: Text(a.name.components(separatedBy: " · ").last ?? ""))
+                                .frame(width: 160).multilineTextAlignment(.trailing)
+                                .onSubmit { store.refresh() }
+                        }
+                    }
+                } header: {
+                    Text("Claude accounts")
+                } footer: {
+                    Text("Name them, for example Work and Personal. Reset tells accounts apart by their Claude organization and never sees their email addresses.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section {
                 // Also here, not only behind the dashboard's Edit plan: the setup guide says everything is in Settings.
                 let accounts = store.usage.accounts.count > 1 ? store.usage.accounts.map { ($0.id, $0.name) } : [("claude", "Claude")]
@@ -467,6 +486,15 @@ struct SettingsView: View {
     private var statusLineSnippet: String {
         let command = ClaudeIntegration.statusLineCommand.replacingOccurrences(of: "\"", with: "\\\"")
         return "\"statusLine\": {\"type\": \"command\", \"command\": \"\(command)\"}"
+    }
+
+    /// A name given to a Claude account, saved as it's typed and applied on the next scan.
+    private func accountName(_ id: String) -> Binding<String> {
+        Binding(get: { ClaudeSource.customNames[id] ?? "" }, set: { v in
+            var names = ClaudeSource.customNames
+            names[id] = v.isEmpty ? nil : v
+            UserDefaults.standard.set(names, forKey: "accountNames")
+        })
     }
 
     private func refreshIntegration() {

@@ -57,12 +57,15 @@ struct ClaudeSource: WindowSource {
         let others = Self.otherOrgs(events: week, main: main)
         var mainStatus = Self.status(id: id, name: "Claude", events: events, org: main ?? Self.currentOrg(under: root), now: now,
                                      canAutoStart: true)
-        if !others.isEmpty, let label = Self.planLabel(account?.plan) { mainStatus.name = "Claude · \(label)" }
+        let ids = ["claude"] + others.map { "claude-" + $0.prefix(8) }
+        let labels = Self.accountLabels(ids: ids, defaults: [Self.planLabel(account?.plan) ?? "Claude Code"] + others.map { Self.otherLabel(org: $0) },
+                                        custom: Self.customNames)
+        if !others.isEmpty { mainStatus.name = "Claude · " + labels[0] }
         var out = [mainStatus]
-        for org in others {
+        for (i, org) in others.enumerated() {
             let mine = week.filter { $0.org == org }.sorted { $0.time < $1.time }
             // Auto-start runs through the CLI, which is signed in to the main account, so it can't start these.
-            var s = Self.status(id: "claude-" + org.prefix(8), name: "Claude · " + Self.otherLabel(org: org), events: mine,
+            var s = Self.status(id: ids[i + 1], name: "Claude · " + labels[i + 1], events: mine,
                                 org: org, now: now, canAutoStart: false)
             // Say whose sessions it's estimated from, keeping anything appended (such as a used-up weekly limit).
             if s.isEstimate, s.source.hasPrefix("Estimated from Claude Code activity") {
@@ -90,6 +93,24 @@ struct ClaudeSource: WindowSource {
             last[o] = max(last[o] ?? .distantPast, e.time)
         }
         return last.sorted { $0.value > $1.value }.map(\.key)
+    }
+
+    /// Names given to accounts in Settings, by status id ("claude", "claude-<org>").
+    static var customNames: [String: String] {
+        UserDefaults.standard.dictionary(forKey: "accountNames") as? [String: String] ?? [:]
+    }
+
+    /// One label per account: the name given in Settings, else the plan. Repeats get a number ("Pro", "Pro 2"),
+    /// since two accounts on the same plan both came out as "Claude · Pro" and couldn't be told apart.
+    static func accountLabels(ids: [String], defaults: [String], custom: [String: String]) -> [String] {
+        var seen: [String: Int] = [:]
+        return zip(ids, defaults).map { id, fallback in
+            let given = custom[id]?.trimmingCharacters(in: .whitespaces) ?? ""
+            let label = given.isEmpty ? fallback : given
+            let n = (seen[label.lowercased()] ?? 0) + 1
+            seen[label.lowercased()] = n
+            return n == 1 ? label : "\(label) \(n)"
+        }
     }
 
     /// "team" → "Team" and so on, for naming the main entry when there's more than one account.
