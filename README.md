@@ -4,7 +4,7 @@
 
 <p align="center">Know exactly when your AI usage window resets, get pinged on your phone when it does, and see what your usage is actually worth.</p>
 
-<p align="center"><a href="https://msfbeast.github.io/reset/"><b>Website</b></a> · <a href="https://github.com/msfbeast/reset/releases/latest"><b>Download</b></a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="CHANGELOG.md">Changelog</a></p>
+<p align="center"><a href="https://msfbeast.github.io/reset/"><b>Website</b></a> · <a href="https://github.com/msfbeast/reset/releases/latest"><b>Download</b></a> · <a href="#faq">FAQ</a> · <a href="#troubleshooting">Troubleshooting</a> · <a href="CHANGELOG.md">Changelog</a></p>
 
 <p align="center"><a href="https://github.com/msfbeast/reset/actions/workflows/tests.yml"><img src="https://github.com/msfbeast/reset/actions/workflows/tests.yml/badge.svg" alt="Tests"></a></p>
 
@@ -82,6 +82,28 @@ The first launch opens a short setup guide that covers all of this. You can run 
 | Status line | **Settings → Advanced → Claude Code integration → Add for me** (it backs up `settings.json` first), or add to `~/.claude/settings.json`: `"statusLine": {"type": "command", "command": "cat \"$HOME/Library/Application Support/Reset/statusline.txt\""}` |
 | MCP server | **Add for me** in the same place, or `claude mcp add --scope user reset -- /Applications/Reset.app/Contents/MacOS/reset-mcp` (with Reset's real location if it isn't in Applications). Tools: `get_claude_usage`, plus `set_budget` (task, max window %, optional downshift model) and `clear_budget`. With a budget set, the advice moves from normal to wrap-up at 80% of the cap to downshift at the cap. The active budget shows under the burn bar on the dashboard, with a Clear button. It's kept in `budget.json` next to `widget.json` and never leaves the Mac. |
 
+## FAQ
+
+**Does Claude checking its own window over MCP use up that window?** Barely. Reset's MCP server makes no API call; it reads a file Reset already keeps on your Mac. The only cost is the answer landing in the conversation, about 150 to 250 tokens a check, plus about 350 tokens for the three tools' descriptions in context. That's less than Claude reading one small file.
+
+**How exact is the countdown?** With live usage on, the reset time and % come straight from your Claude account, refreshed every 2 minutes while you work and every 5 when idle. Without it, Reset estimates from your Claude Code activity and labels the numbers "estimated", so you always know which you're looking at.
+
+**Does it track the weekly limit?** Yes, on Pro and Max plans with live usage on. The menu shows the weekly %, it warns you from 80% (in the menu, the status line and one notification a week), and once it's used up it shows when it lifts. Claude sees it through the MCP server too.
+
+**How do task budgets work?** Before a big task, Claude (or you, by asking it) sets a budget over MCP: a task name, the window % to stop at, and optionally a smaller model to fall back to. As the window nears that % Claude is told to wrap up, and past it to switch to the fallback model or stop and check in. The cap is the window's total usage ("stop when the window hits 60%"), not the task's own share. It's guidance Claude follows, not a hard lock.
+
+**Does auto-start use up my usage?** Almost none. It sends one word to the smallest model (Haiku) with no tools or MCP servers loaded, which is just enough to start the 5-hour clock. It waits for a working network instead of failing offline, and gives up after 4 tries.
+
+**Does it work with the lid closed?** Phone alerts do: each one is queued on the ntfy server ahead of time, so it arrives while the Mac sleeps. Auto-start needs the Mac awake, so leave it plugged in with **Stay awake** on; on battery with the lid closed, it starts the window the moment the Mac wakes.
+
+**I have two Claude accounts.** Each gets its own entry, window, costs and plan price, and you can name them (Settings → General → Claude accounts). Live usage, the forecast, auto-start and budgets follow the account Claude Code is signed in to; the other one is estimated. See [Troubleshooting](#troubleshooting) for details.
+
+**Does it read my prompts or code?** No. From Claude Code's local logs it keeps token counts, model names, times, tool names, project folders and session titles, never the text of your prompts or Claude's replies. See [Privacy](#privacy) for exactly what leaves your Mac and when.
+
+**Is this made by Anthropic?** No. Reset is an independent, open source project, not affiliated with or endorsed by Anthropic.
+
+**Why does the first launch need "Open Anyway", and why no widgets in the download?** Reset isn't notarized by Apple yet. Notarization is coming; until then, open it once via System Settings → Privacy & Security, and build from source for widgets (see [Install](#install)).
+
 ## Troubleshooting
 
 **macOS says it can't open Reset.** It isn't notarized yet. Open it once, close the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway**. You only do this once.
@@ -98,7 +120,7 @@ If macOS asks whether `security` may read "Claude Code-credentials" from your Ke
 
 **The countdown is off, or the window started earlier than Reset thinks.** Without live usage, Reset can't see Claude used on claude.ai or in the desktop app, only Claude Code. Live usage fixes this. Without it, pick **I just used Claude on the web** from the menu's **…** button when you start there.
 
-**I use two Claude accounts (say, a work Team plan and a personal Pro plan).** Reset shows each as its own entry, with its own window and countdown, worked out from that account's Claude Code sessions. Live usage, the forecast, auto-start and budgets follow the account the Claude Code CLI is signed in to (`claude auth status` shows which); the other one is estimated, plus the Claude desktop app's readings for it. The dashboard's costs still add both together.
+**I use two Claude accounts (say, a work Team plan and a personal Pro plan).** Reset shows each as its own entry, with its own window and countdown, worked out from that account's Claude Code sessions. Live usage, the forecast, auto-start and budgets follow the account the Claude Code CLI is signed in to (`claude auth status` shows which); the other one is estimated, plus the Claude desktop app's readings for it. The dashboard's All / Team / Pro switch splits costs, sessions and projects by account, and each account can have its own plan price (Settings → General).
 
 **The menu bar shows only the countdown, with no percentage.** There's no usage reading yet, and Reset won't show the clock as if it were usage. Turn on live usage. Want plain text instead of the colored pill? **Settings → Appearance → Menu bar**.
 
