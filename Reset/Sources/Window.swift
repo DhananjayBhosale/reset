@@ -41,6 +41,8 @@ struct WindowStatus: Identifiable, Equatable {
     var lastActivity: Date? = nil
     /// For Claude entries, the organization (account) they're for.
     var account: String? = nil
+    /// How long one window lasts, when the provider sets it (a custom tool's own length); otherwise see `Store.cardData`.
+    var windowLength: TimeInterval? = nil
 
     var resetsAt: Date? {
         if case .active(let d) = state { return d }

@@ -46,7 +46,7 @@ final class Store {
 
     /// What a look card needs for one provider, with the mascot in its current mood.
     func cardData(for s: WindowStatus) -> CardData {
-        let window: TimeInterval = s.id == "gemini" ? 86400 : 5 * 3600
+        let window: TimeInterval = s.windowLength ?? (s.id == "gemini" ? 86400 : 5 * 3600)
         return CardData(id: s.id, name: s.name, color: Theme.color(for: s.id), windowStart: s.resetsAt?.addingTimeInterval(-window),
                         resetsAt: s.resetsAt, ready: s.state == .ready, blockedUntil: s.blockedUntil, used: s.usedPercent,
                         mascot: MascotArt.image(s.id, Mood.of(s, justReset: false)).map { Image(nsImage: $0) }, windowLength: window,
