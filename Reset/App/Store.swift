@@ -415,7 +415,7 @@ final class Store {
         else if let sec = c.secondary, sec.isHigh, let u = sec.usedPercent { parts.append("wk \(Int(u.rounded()))%") }
         if let out = runsOut { parts.append("runs out ~\(Fmt.clock.string(from: out))") }
         if let b = budget { parts.append(b.tag(used: budgetUsed)) }
-        let today = usage.calls.filter { Calendar.current.isDateInToday($0.time) }.reduce(0) { $0 + $1.cost }
+        let today = usage.todayCost
         if today > 0 { parts.append(String(format: "$%.0f today", today)) }
         let line = "◷ " + parts.joined(separator: " · ")
         let url = WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("statusline.txt")
@@ -708,6 +708,8 @@ final class Store {
         var daily = Array(repeating: 0.0, count: 14)
         var hourT = Array(repeating: 0.0, count: 24), hourY = Array(repeating: 0.0, count: 24)
         var proj: [String: Double] = [:]
+        // One name per folder rather than per call: naming runs regular expressions, and this loop sees every call.
+        var names: [String: String] = [:]
         let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: Date()))!
         let daysInMonth = cal.range(of: .day, in: .month, for: Date())?.count ?? 30
         for c in usage.calls {
@@ -716,8 +718,8 @@ final class Store {
             if d == 0 { hourT[cal.component(.hour, from: c.time)] += c.cost }
             if d == 1 { hourY[cal.component(.hour, from: c.time)] += c.cost }
             if c.time >= Date().addingTimeInterval(-30 * 86400) {
-                let name = ProjectNames.shared.name(for: c.project)
-                proj[name, default: 0] += c.cost
+                if names[c.project] == nil { names[c.project] = ProjectNames.shared.name(for: c.project) }
+                proj[names[c.project]!, default: 0] += c.cost
             }
         }
         func cumulative(_ a: [Double]) -> [Double] { var s = 0.0; return a.map { s += $0; return (s * 100).rounded() / 100 } }

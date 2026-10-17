@@ -323,10 +323,18 @@ final class TranscriptScanner {
             // A session runs under one account; its transcript's org applies to all its events.
             out += entry.events.filter { $0.time >= since }.map { var e = $0; e.org = entry.org; return e }
         }
-        // Drop cache entries for files that aged out of every possible lookback.
-        if cache.count > seen.count + 200 { cache = cache.filter { seen.contains($0.key) } }
+        // Drop cache entries for files that aged out of every possible lookback, not every file this call skipped:
+        // a scan asks for a week and then for 10 hours, and keeping only the 10 hours' files made every 60-second
+        // scan parse the whole week of transcripts again.
+        if cache.count > seen.count + 200 {
+            let oldest = Date().addingTimeInterval(-Self.keep)
+            cache = cache.filter { seen.contains($0.key) || $0.value.mtime >= oldest }
+        }
         return out
     }
+
+    /// A day longer than the longest lookback asked for (ClaudeSource's week).
+    static let keep: TimeInterval = 8 * 86400
 
     private static let iso: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
