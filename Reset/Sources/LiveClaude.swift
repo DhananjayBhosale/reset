@@ -3,9 +3,24 @@ import Foundation
 /// Opt-in exact Claude usage: reads Claude Code's own sign-in from the Keychain and asks Anthropic's usage
 /// endpoint for the current 5-hour and weekly windows. Only usage numbers are fetched, the token is only
 /// ever sent to api.anthropic.com, and Reset never refreshes or rewrites it (that would sign Claude Code out).
+/// One more copy per other account signed in to the Claude desktop app does the same with that app's sign-in.
 final class LiveClaude {
     struct Window: Codable, Equatable { var percent: Double; var resetsAt: Date? }
-    struct Snapshot: Codable, Equatable { var fiveHour: Window?; var sevenDay: Window?; var fetchedAt: Date }
+    struct Snapshot: Codable, Equatable {
+        var fiveHour: Window?; var sevenDay: Window?; var fetchedAt: Date
+        /// The organization Claude Code's sign-in belongs to, and its plan ("team"…), from Anthropic's profile
+        /// endpoint. `claude auth status` can't be trusted for this: it reads ~/.claude.json, which the Claude
+        /// desktop app's own Claude Code rewrites with the desktop app's account.
+        var org: String? = nil
+        var plan: String? = nil
+    }
+
+    /// Whose sign-in this copy reads.
+    enum Source: Equatable {
+        case claudeCode
+        /// The Claude desktop app's token for this organization (see ClaudeDesktopSignIn).
+        case desktop(org: String)
+    }
 
     /// When Reset last asked, until when Anthropic told it to wait, and the last good reading. Saved to
     /// live-schedule.json and re-read before every fetch, so a restart (or a second copy of the app) respects a
@@ -36,6 +51,11 @@ final class LiveClaude {
 
     static var scheduleURL: URL { WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("live-schedule.json") }
 
+    /// A desktop-app account's own schedule, so one account's "slow down" doesn't hold back the others.
+    static func scheduleURL(org: String) -> URL {
+        scheduleURL.deletingLastPathComponent().appendingPathComponent("live-schedule-\(org.prefix(8)).json")
+    }
+
     static func loadSchedule(_ url: URL?) -> Schedule? {
         guard let url, let d = try? Data(contentsOf: url) else { return nil }
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .secondsSince1970
@@ -62,6 +82,9 @@ final class LiveClaude {
     }
 
     private(set) var snapshot: Snapshot?
+    /// Whose sign-in this is, as Anthropic last said, from the last reading whatever its age: unlike the numbers,
+    /// an account doesn't go stale, and without it a launch would start out on ~/.claude.json's account.
+    private(set) var verifiedAccount: (org: String, plan: String?)?
     private(set) var state: State = .off
     /// True when the failure is about Claude Code's sign-in, which the user has to fix (not a network blip).
     private(set) var needsSignIn = false
@@ -72,13 +95,18 @@ final class LiveClaude {
     private var backoffUntil = Date.distantPast
     private let lock = NSLock()
     private let scheduleURL: URL?
+    let source: Source
+    /// The token the profile was last asked about (its hash, so the token itself isn't kept) and the answer.
+    private var verified: (token: Int, org: String?, plan: String?)?
 
     /// With no `scheduleURL` nothing is read or written (tests).
-    init(scheduleURL: URL? = nil, now: Date = Date()) {
+    init(scheduleURL: URL? = nil, now: Date = Date(), source: Source = .claudeCode) {
         self.scheduleURL = scheduleURL
+        self.source = source
         guard let saved = Self.loadSchedule(scheduleURL) else { return }
         lastAttempt = saved.lastAttempt
         backoffUntil = saved.backoffUntil
+        if let org = saved.lastGood?.org { verifiedAccount = (org, saved.lastGood?.plan) }
         if let good = saved.lastGood, now.timeIntervalSince(good.fetchedAt) < Self.freshFor {
             snapshot = good
             state = .ok(good.fetchedAt)
@@ -124,23 +152,28 @@ final class LiveClaude {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             // Test hook: `-simulateSignedOut YES` behaves as if Claude Code's sign-in expired.
-            if UserDefaults.standard.bool(forKey: "simulateSignedOut") {
+            if self.source == .claudeCode, UserDefaults.standard.bool(forKey: "simulateSignedOut") {
                 self.finish(.problem("Claude Code's sign-in has expired. Open Claude Code once and it renews itself"), done)
                 return
             }
-            guard let token = Self.readToken() else {
-                self.finish(.problem("Claude Code isn't signed in on this Mac, or Keychain access was denied"), done)
+            let token: Token?
+            switch self.source {
+            case .claudeCode: token = Self.readToken()
+            case .desktop(let org): token = ClaudeDesktopSignIn.token(org: org)
+            }
+            guard let token else {
+                self.finish(.problem(self.source == .claudeCode ? "Claude Code isn't signed in on this Mac, or Keychain access was denied"
+                                     : "The Claude desktop app's sign-in for this account has expired. Opening the desktop app renews it"), done)
                 return
             }
             if let exp = token.expiresAt, exp < Date() {
                 self.finish(.problem("Claude Code's sign-in has expired. Open Claude Code once and it renews itself"), done)
                 return
             }
-            var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!, timeoutInterval: 20)
-            req.setValue("Bearer \(token.access)", forHTTPHeaderField: "Authorization")
-            req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-            req.setValue("application/json", forHTTPHeaderField: "Accept")
-            req.setValue("claude-cli/2.1 (external, cli)", forHTTPHeaderField: "User-Agent")
+            let account = self.verify(token)
+            // The account is known once the profile says, even if the usage call below fails.
+            if let account { DispatchQueue.main.async { self.verifiedAccount = account } }
+            let req = Self.request("usage", token: token)
             URLSession.shared.dataTask(with: req) { data, resp, err in
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                 if let err { self.finish(.problem("Couldn't reach Anthropic: \(err.localizedDescription)"), done); return }
@@ -164,12 +197,13 @@ final class LiveClaude {
                     self.finish(.problem("Unexpected reply from Anthropic (HTTP \(code))"), done)
                     return
                 }
-                let snap = Snapshot(fiveHour: Self.window(obj["five_hour"]), sevenDay: Self.window(obj["seven_day"]), fetchedAt: Date())
-                self.persist { $0.lastGood = snap }
-                // Diagnostics: the usage windows exactly as received (percentages and reset times only).
-                var diag: [String: Any] = ["fetched": ISO8601DateFormatter().string(from: Date())]
+                let snap = Snapshot(fiveHour: Self.window(obj["five_hour"]), sevenDay: Self.window(obj["seven_day"]), fetchedAt: Date(),
+                                    org: account?.org, plan: account?.plan)
+                self.persist { $0.lastGood = Self.keepingAccount(snap, from: $0.lastGood) }
+                // Diagnostics: the usage windows exactly as received (percentages and reset times only), and whose.
+                var diag: [String: Any] = ["fetched": ISO8601DateFormatter().string(from: Date()), "org": account?.org ?? NSNull()]
                 for k in ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"] { diag[k] = obj[k] ?? NSNull() }
-                if let d = try? JSONSerialization.data(withJSONObject: diag, options: [.prettyPrinted, .sortedKeys]) {
+                if self.source == .claudeCode, let d = try? JSONSerialization.data(withJSONObject: diag, options: [.prettyPrinted, .sortedKeys]) {
                     try? d.write(to: WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("live-usage.json"))
                 }
                 DispatchQueue.main.async {
@@ -199,6 +233,7 @@ final class LiveClaude {
         // Switched off: forget the last reading too, so switching back on never shows something stale.
         persist { $0.lastGood = nil }
         snapshot = nil
+        verifiedAccount = nil
         state = .off
     }
 
@@ -207,7 +242,7 @@ final class LiveClaude {
             let w = why.lowercased()
             needsSignIn = w.contains("sign-in") || w.contains("signed in") || w.contains("didn't accept")
         }
-        if case .problem(let why) = s {
+        if case .problem(let why) = s, source == .claudeCode {
             let diag: [String: Any] = ["fetched": ISO8601DateFormatter().string(from: Date()), "problem": why]
             if let d = try? JSONSerialization.data(withJSONObject: diag, options: .prettyPrinted) {
                 try? d.write(to: WidgetSnapshot.url.deletingLastPathComponent().appendingPathComponent("live-usage.json"))
@@ -252,6 +287,59 @@ final class LiveClaude {
         return Token(access: access, expiresAt: exp)
     }
 
+    /// A GET to one of Anthropic's OAuth endpoints ("usage", "profile"), sent the way Claude Code sends it.
+    static func request(_ endpoint: String, token: Token) -> URLRequest {
+        var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/\(endpoint)")!, timeoutInterval: 20)
+        req.setValue("Bearer \(token.access)", forHTTPHeaderField: "Authorization")
+        req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("claude-cli/2.1 (external, cli)", forHTTPHeaderField: "User-Agent")
+        return req
+    }
+
+    /// The organization and plan Claude Code's token belongs to, asked once per token (they last hours) and
+    /// blocking, so only call it off the main thread. Desktop tokens are filed under their organization already.
+    /// Nil when it can't tell; the caller then goes on as before, with `claude auth status`.
+    private func verify(_ token: Token) -> (org: String, plan: String?)? {
+        guard source == .claudeCode else { return nil }
+        let key = token.access.hashValue
+        lock.lock(); let known = verified; lock.unlock()
+        if let known, known.token == key { return known.org.map { ($0, known.plan) } }
+        var code = 0, found: (org: String, plan: String?)?
+        let sem = DispatchSemaphore(value: 0)
+        let task = URLSession.shared.dataTask(with: Self.request("profile", token: token)) { data, resp, _ in
+            code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 200, let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                found = Self.account(fromProfile: obj)
+            }
+            sem.signal()
+        }
+        task.resume()
+        // Given up on: asked again next time, and the late reply can't change what's read here.
+        guard sem.wait(timeout: .now() + 25) == .success else { task.cancel(); return nil }
+        // A clear answer is kept for this token; a network error or a "slow down" is asked again next time.
+        if code == 200 || (400..<500).contains(code) && code != 429 {
+            lock.lock(); verified = (key, found?.org, found?.plan); lock.unlock()
+        }
+        return found
+    }
+
+    /// A reading whose profile couldn't be read keeps the account the last good one named, as `verifiedAccount` does
+    /// in memory, so a restart still knows whose numbers they are.
+    static func keepingAccount(_ snap: Snapshot, from previous: Snapshot?) -> Snapshot {
+        guard snap.org == nil, let previous else { return snap }
+        var s = snap; s.org = previous.org; s.plan = previous.plan
+        return s
+    }
+
+    /// `organization.uuid` from a profile reply, and its `organization_type` without the "claude_" prefix
+    /// ("claude_team" → "team"), the same words `claude auth status` uses for plans.
+    static func account(fromProfile obj: [String: Any]) -> (org: String, plan: String?)? {
+        guard let o = obj["organization"] as? [String: Any], let uuid = o["uuid"] as? String, !uuid.isEmpty else { return nil }
+        let type = (o["organization_type"] as? String).map { $0.hasPrefix("claude_") ? String($0.dropFirst(7)) : $0 }
+        return (uuid.lowercased(), type?.isEmpty == false ? type : nil)
+    }
+
     /// Overlays live numbers on the transcript-based status.
     func apply(to s: inout WindowStatus, now: Date) {
         guard let snap = snapshot, now.timeIntervalSince(snap.fetchedAt) < 15 * 60 else { return }
@@ -263,7 +351,7 @@ final class LiveClaude {
             if let r = fh.resetsAt, r > now { s.state = .active(resetsAt: r) }
             else if fh.percent == 0 { s.state = .ready }
             s.isEstimate = false
-            s.source = "Live from your Claude account"
+            s.source = source == .claudeCode ? "Live from your Claude account" : "Live, through the Claude desktop app's sign-in"
         }
         // Live weekly data is authoritative both ways: it sets the block when the limit is used up,
         // and clears a stale one (for example from an old transcript limit row) once it isn't.

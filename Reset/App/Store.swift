@@ -32,12 +32,47 @@ final class Store {
     var liveClaudeEnabled: Bool {
         didSet {
             UserDefaults.standard.set(liveClaudeEnabled, forKey: "liveClaude")
-            if liveClaudeEnabled { note("Live Claude usage on") } else { liveClaude.reset() }
+            if liveClaudeEnabled {
+                note("Live Claude usage on")
+                // Switching live usage off dropped the desktop app's key; get it back if that option is still on.
+                if desktopAccountsEnabled { allowDesktop() }
+            } else { liveClaude.reset(); dropDesktopLive() }
             refresh()
         }
     }
     /// Its schedule and last reading are saved, so restarts respect a "slow down" (demo mode never touches it).
     let liveClaude = LiveClaude(scheduleURL: Demo.isOn ? nil : LiveClaude.scheduleURL)
+    /// Live usage for the Claude desktop app's other accounts too (see ClaudeDesktopSignIn). Only with live usage on.
+    var desktopAccountsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(desktopAccountsEnabled, forKey: "liveClaudeDesktop")
+            if desktopAccountsEnabled { allowDesktop() } else { dropDesktopLive(); refresh() }
+        }
+    }
+    /// One per other account signed in to the desktop app, by organization.
+    private var desktopLive: [String: LiveClaude] = [:]
+    private(set) var desktopState: ClaudeDesktopSignIn.State = .off
+    /// How many accounts are read through the desktop app, beyond the one Claude Code is signed in to.
+    private(set) var desktopAccounts = 0
+    /// Listed, but their sign-in has expired until the desktop app is opened and renews it.
+    private(set) var desktopExpired = 0
+
+    /// Reads the desktop app's key (macOS asks, unless it was told "Always Allow"), then rescans.
+    func allowDesktop() {
+        ClaudeDesktopSignIn.allow { [weak self] ok in
+            self?.note(ok ? "Reading the Claude desktop app's accounts" : "No access to the Claude desktop app's sign-in")
+            self?.refresh()
+        }
+    }
+
+    private func dropDesktopLive() {
+        desktopLive.values.forEach { $0.reset() }
+        desktopLive = [:]
+        desktopState = .off
+        desktopAccounts = 0
+        desktopExpired = 0
+        ClaudeDesktopSignIn.forget()
+    }
     /// Saved across restarts, except in demo mode, which mustn't touch real files.
     let forecast = Forecast(storeURL: Demo.isOn ? nil : Forecast.defaultURL)
     var look: Look = Look(rawValue: UserDefaults.standard.string(forKey: "look") ?? "") ?? .glow {
@@ -98,6 +133,7 @@ final class Store {
         ntfyTopic = d.string(forKey: "ntfyTopic") ?? ""
         commands = Self.load("commands") ?? Kicker.defaultCommands()
         liveClaudeEnabled = d.bool(forKey: "liveClaude")
+        desktopAccountsEnabled = d.bool(forKey: "liveClaudeDesktop")
         if prefs["antigravity"] == nil {
             let has = FileManager.default.fileExists(atPath: "/Applications/Antigravity.app")
             prefs["antigravity"] = ProviderPrefs(enabled: has, alert: has)
@@ -115,6 +151,8 @@ final class Store {
         updater.start()
         usage.start()
         refresh()
+        // The desktop app's key is kept in memory only, so it's read again each launch; scans never read it.
+        if !Demo.isOn, liveClaudeEnabled && desktopAccountsEnabled { allowDesktop() }
         // A 1 s tick keeps the countdowns live; disk is rescanned every 60 s or on demand.
         tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.onTick() }
         startListener = StartRequest.Listener(name: StartRequest.name("claude")) { [weak self] in self?.startFromWidget("claude") }
@@ -240,10 +278,21 @@ final class Store {
         scanning = true
         let extras = claudeExtraStarts
         let custom = self.custom
+        // Whose Claude Code sign-in live usage reads, as Anthropic reported it (see LiveClaude.Snapshot.org).
+        let verified = liveClaudeEnabled ? liveClaude.verifiedAccount : nil
+        let desktopOn = liveClaudeEnabled && desktopAccountsEnabled
         scanQueue.async { [weak self] in
             let t = Date()
+            var account = ClaudeCLI.account(now: t)
+            // `claude auth status`'s plan only counts when it's for the same account.
+            if let v = verified { account = .init(orgId: v.org, plan: v.plan ?? (account?.orgId == v.org ? account?.plan : nil)) }
+            // Only the organizations and plans leave this queue; the tokens are read again for each fetch.
+            let desktop = desktopOn ? ClaudeDesktopSignIn.read(now: t) : (state: .off, accounts: [:])
+            let desktopState = desktop.state
+            let desktopPlans = desktop.accounts.filter { $0.key != account?.orgId }.mapValues(\.plan)
+            let desktopUsable = Set(desktop.accounts.filter { ClaudeDesktopSignIn.usable($0.value, now: t) }.keys)
             // One Claude entry per account (see ClaudeSource.readAll), then the other tools.
-            var list = ClaudeSource(extraStarts: extras).readAll(now: t, account: ClaudeCLI.account(now: t))
+            var list = ClaudeSource(extraStarts: extras).readAll(now: t, account: account, desktop: desktopPlans)
             list += [
                 CodexSource().read(now: t),
                 GeminiSource().read(now: t),
@@ -264,6 +313,21 @@ final class Store {
                     if let sec = list[i].secondary {
                         self.warnIfWeeklyHigh(list[i].name, sec)
                     }
+                }
+                // Checked again here: the option may have been turned off while this scan ran.
+                if desktopOn, self.liveClaudeEnabled, self.desktopAccountsEnabled {
+                    self.desktopState = desktopState
+                    var liveCount = 0, expired = 0
+                    for org in desktopPlans.keys {
+                        guard let i = list.firstIndex(where: { $0.id == "claude-" + org.prefix(8) }) else { continue }
+                        let live = self.desktopLive[org] ?? LiveClaude(scheduleURL: LiveClaude.scheduleURL(org: org), source: .desktop(org: org))
+                        self.desktopLive[org] = live
+                        live.apply(to: &list[i], now: Date())
+                        live.poll(interval: LiveClaude.interval(lastActivity: list[i].lastActivity)) { [weak self] in self?.refresh() }
+                        if desktopUsable.contains(org) { liveCount += 1 } else { expired += 1 }
+                    }
+                    self.desktopAccounts = liveCount
+                    self.desktopExpired = expired
                 }
                 self.statuses = list
                 self.usage.accounts = list.filter { $0.id == "claude" || $0.id.hasPrefix("claude-") }.map { ($0.id, $0.name, $0.account) }
@@ -442,7 +506,9 @@ final class Store {
             ["id": s.id, "enabled": prefs(for: s.id).enabled, "state": "\(s.state)", "used": s.usedPercent ?? NSNull(),
              "resetsAt": d(s.resetsAt), "estimate": s.isEstimate, "source": s.source, "blockedUntil": d(s.blockedUntil)]
         }
-        out["live"] = ["enabled": liveClaudeEnabled, "state": "\(liveClaude.state)", "needsSignIn": liveClaude.needsSignIn]
+        out["live"] = ["enabled": liveClaudeEnabled, "state": "\(liveClaude.state)", "needsSignIn": liveClaude.needsSignIn,
+                       "verifiedOrg": liveClaude.verifiedAccount != nil]
+        out["liveDesktop"] = ["enabled": desktopAccountsEnabled, "state": "\(desktopState)", "accounts": desktopAccounts, "expired": desktopExpired]
         out["forecast"] = d(forecast.runsOutAt)
         out["autoStart"] = ["claude": prefs(for: "claude").autoStart, "command": commands["claude"] ?? "",
                             "kickDue": auto.kickDue.mapValues { "\(iso.string(from: $0.reset)) tries \($0.attempts)" },

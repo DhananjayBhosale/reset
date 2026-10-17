@@ -20,7 +20,7 @@ Everything it reads stays on your Mac.
 - **Phone alerts while your Mac sleeps.** Reset queues each reset alert on an [ntfy](https://ntfy.sh) server ahead of time, so it arrives on your phone even with the lid closed.
 - **Limit forecast.** At your current pace, will you hit the limit before the reset? Reset warns you once per window, on your Mac and your phone.
 - **Weekly limit, early.** On Pro and Max plans, Reset warns from 80% of the weekly limit (in the menu, the status line and one notification a week), so a used-up week doesn't come as a surprise.
-- **Work and personal accounts.** Use a Team account and a personal Pro plan? Each gets its own entry, window and countdown, and the dashboard splits costs, sessions and projects by account, each against its own plan price.
+- **Work and personal accounts.** Use a Team account and a personal Pro plan? Each gets its own entry, window and countdown, and the dashboard splits costs, sessions and projects by account, each against its own plan price. Live usage covers the account Claude Code is signed in to and, if you allow it, the other accounts signed in to the Claude desktop app.
 - **Notifications you can act on.** Clicking one opens the dashboard; reset alerts have a Start now button and sign-in problems a Sign in button. Times follow your 12 or 24-hour clock.
 - **Auto-start.** Optional. When a window runs out, Reset sends a one-word prompt so the next window starts right away instead of when you wake up.
 - **Dashboard.** API-price value of your usage against your plan, cache savings, every 5-hour window of the week, token mix, when you build, cost per session and per project, and what used each session (main thread, subagents, each MCP server). Right-click a session to copy the command that resumes it. ⌘1–4 switch the range, ⌘R rescans.
@@ -122,7 +122,7 @@ If macOS asks whether `security` may read "Claude Code-credentials" from your Ke
 
 **The countdown is off, or the window started earlier than Reset thinks.** Without live usage, Reset can't see Claude used on claude.ai or in the desktop app, only Claude Code. Live usage fixes this. Without it, pick **I just used Claude on the web** from the menu's **…** button when you start there.
 
-**I use two Claude accounts (say, a work Team plan and a personal Pro plan).** Reset shows each as its own entry, with its own window and countdown, worked out from that account's Claude Code sessions. Live usage, the forecast, auto-start and budgets follow the account the Claude Code CLI is signed in to (`claude auth status` shows which); the other one is estimated, plus the Claude desktop app's readings for it. The dashboard's All / Team / Pro switch splits costs, sessions and projects by account, and each account can have its own plan price (Settings → General).
+**I use two Claude accounts (say, a work Team plan and a personal Pro plan).** Reset shows each as its own entry, with its own window and countdown, worked out from that account's Claude Code sessions. Live usage, the forecast, auto-start and budgets follow the account the Claude Code CLI is signed in to; with live usage on, Reset asks Anthropic which account that is, because `claude auth status` can show the Claude desktop app's account instead. The other one is estimated, plus the Claude desktop app's readings for it, unless it's signed in to the Claude desktop app: then turn on **Settings → General → Also other accounts in the Claude desktop app** for live usage there too. The dashboard's All / Team / Pro switch splits costs, sessions and projects by account, and each account can have its own plan price (Settings → General).
 
 **The menu bar shows only the countdown, with no percentage.** There's no usage reading yet, and Reset won't show the clock as if it were usage. Turn on live usage. Want plain text instead of the colored pill? **Settings → Appearance → Menu bar**.
 
@@ -148,12 +148,13 @@ Reset reads local files only:
 
 - Claude Code transcripts in `~/.claude/projects`. Reset scans them for usage and keeps only token counts, models, timestamps, tool and MCP names, project folders and session titles, in a cache in `~/Library/Application Support/Reset`. Your prompts and Claude's replies are never stored.
 - `~/Library/Application Support/Claude/plan-usage-history.json` from the Claude desktop app
+- Only if you turn on **Also other accounts in the Claude desktop app**: the sign-in the desktop app keeps in `~/Library/Application Support/Claude/config.json`, decrypted in memory with the desktop app's key from your Keychain. macOS asks you first; click **Always Allow** so it doesn't ask again each time Reset starts. The same key can decrypt other data the desktop app encrypts on this Mac; Reset reads only the sign-in
 - Codex session logs in `~/.codex/sessions`
 - Antigravity's local language server, while Antigravity is open
 
 It only sends anything off your Mac for these features, and only to the place you'd expect:
 
-- **Live Claude usage** sends Claude Code's sign-in to `api.anthropic.com` to read your usage. Reset never stores, refreshes or rewrites that sign-in.
+- **Live Claude usage** sends Claude Code's sign-in to `api.anthropic.com` to read your usage and which account it belongs to. With **Also other accounts in the Claude desktop app** on, it does the same with the desktop app's sign-in for each of its other accounts. Reset never stores, refreshes or rewrites a sign-in.
 - **Phone alerts** send the alert text to the ntfy server you choose. The text is only reset and run-out times, such as "Claude has reset: fresh window ready since 7:40 PM", but anyone who knows your topic name can read it, so pick a long, random topic.
 - **Update checks** ask `api.github.com` once a day whether a newer release exists. Turn this off in Settings → General.
 

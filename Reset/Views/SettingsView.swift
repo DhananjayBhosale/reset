@@ -77,11 +77,21 @@ struct SettingsView: View {
                 Toggle("Live usage from your Claude account", isOn: $store.liveClaudeEnabled)
                 if store.liveClaudeEnabled {
                     Text(liveText).font(.caption).foregroundStyle(liveIsProblem ? Color.orange : Color.secondary)
+                    Toggle("Also other accounts in the Claude desktop app", isOn: $store.desktopAccountsEnabled)
+                    if store.desktopAccountsEnabled {
+                        HStack {
+                            Text(desktopText).font(.caption).foregroundStyle(desktopIsProblem ? Color.orange : Color.secondary)
+                            if store.desktopState == .needsPermission {
+                                Spacer()
+                                Button("Allow…") { store.allowDesktop() }
+                            }
+                        }
+                    }
                 }
             } header: {
                 Text("Claude accuracy")
             } footer: {
-                Text("Turn this on for exact usage and reset times, updated every 2 minutes while you're using Claude Code and every 5 minutes otherwise. Without it, Reset estimates from your Claude Code activity and labels its numbers \"estimated\". It reads Claude Code's sign-in from your Keychain (macOS may ask once) and sends it only to api.anthropic.com. Usage numbers only, never chats.")
+                Text("Turn this on for exact usage and reset times, updated every 2 minutes while you're using Claude Code and every 5 minutes otherwise. Without it, Reset estimates from your Claude Code activity and labels its numbers \"estimated\". It reads Claude Code's sign-in from your Keychain (macOS may ask once) and sends it only to api.anthropic.com. Usage numbers only, never chats. Other accounts work the same way with the sign-in the Claude desktop app keeps for them, once you allow Reset to read the desktop app's key; Reset never changes or renews that sign-in.")
                     .foregroundStyle(.secondary)
             }
 
@@ -573,6 +583,23 @@ struct SettingsView: View {
         }
     }
     private var liveIsProblem: Bool { if case .problem = store.liveClaude.state { return true }; return false }
+
+    private var desktopText: String {
+        switch store.desktopState {
+        case .off: return "Connecting…"
+        case .notFound: return "The Claude desktop app isn't signed in on this Mac"
+        case .needsPermission: return "macOS needs your OK to read the desktop app's sign-in"
+        case .ok:
+            let live = store.desktopAccounts, expired = store.desktopExpired
+            if live == 0 && expired == 0 { return "No other account is signed in to the desktop app right now" }
+            return [live > 0 ? "Live for \(live) more account\(live == 1 ? "" : "s")" : nil,
+                    expired > 0 ? "\(expired) expired until the desktop app is opened" : nil].compactMap { $0 }.joined(separator: " · ")
+        case .problem(let why): return why
+        }
+    }
+    private var desktopIsProblem: Bool {
+        switch store.desktopState { case .needsPermission, .problem: return true; default: return false }
+    }
 
     private func binding(_ id: String, _ key: WritableKeyPath<ProviderPrefs, Bool>) -> Binding<Bool> {
         Binding(get: { store.prefs(for: id)[keyPath: key] },
