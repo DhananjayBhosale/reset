@@ -207,4 +207,4 @@ Reset is an independent project and is not affiliated with, endorsed by or spons
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). It grants no rights to the logos the mascot fan art is based on; see [NOTICE](NOTICE) and Trademarks above.
